@@ -1,5 +1,7 @@
 from kivy.app import App
 
+from kivy.core.window import Window
+
 from kivy.core.image import Image as CoreImage
 
 from kivy.uix.boxlayout import BoxLayout
@@ -30,7 +32,7 @@ from collections import OrderedDict
 from functools import partial
 
 Duplex_Layout = True
-Force_Duplex_Layout = False
+Force_Duplex_Layout = True
 
 curdir = dirname(__file__)
 
@@ -162,6 +164,19 @@ class Slider_Extended(Slider):
 
 # Build the app screen
 class Build_CloudWatch_Remote ( App ):
+    def __init__(self, **kwargs):
+        super(Build_CloudWatch_Remote, self).__init__(**kwargs)
+        Window.bind(on_key_down=self.on_keyboard_down)
+
+        horizontal_size, vertical_size = Window.size
+        # print ("h:", horizontal_size, "v:", vertical_size)
+        for widget_descriptor in widget_descriptor_list:
+            widget_descriptor["width"] = horizontal_size
+            if (Duplex_Layout):
+                widget_descriptor["height"] = int(round(vertical_size * 0.475))
+            else:
+                widget_descriptor["height"] = int(round(vertical_size * 2 * 0.475))
+
     def build(self):
         Get_CloudWatch_Graphs()
 
@@ -258,6 +273,13 @@ class Build_CloudWatch_Remote ( App ):
             self.Upper_Widget_Box.add_widget(Image(texture=ci_widget_image_list[0].texture))
         
         self.CloudWatch_Remote.canvas.ask_update()
+
+    def on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
+        # print("\nThe key", keycode, "have been pressed")
+        # print(" - text is %r" % text)
+        # print(" - modifiers are %r" % modifiers)
+        if ((keycode == 81) or (keycode == 79)): self.Carousel_Widget.load_next()
+        elif ((keycode == 82) or (keycode == 80)): self.Carousel_Widget.load_previous()
 
 
 # Instantiate and run the kivy app
