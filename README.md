@@ -1,4 +1,5 @@
 # Overview
+Safe, lightweight AWS/CW monitoring app targeted for Android, based on Kivy and boto3.
 
 # Steps to set up AWS/CW access keyhole
 
