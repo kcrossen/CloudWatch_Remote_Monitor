@@ -8,4 +8,4 @@
 ![Alt text](CloudWatch_Keyhole_User_f.jpg?raw=true "Create keyhole step 6")
 ![Alt text](CloudWatch_Keyhole_User_g.jpg?raw=true "Create keyhole step 7")
 
-![Alt text](CloudWatch_Keyhole_User_h.jpg?raw=true "Create keyhole step 8")
+![Alt text](CloudWatch_Keyhole_User_h1.jpg?raw=true "Create keyhole step 8")
