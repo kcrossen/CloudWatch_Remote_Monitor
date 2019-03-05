@@ -1,3 +1,10 @@
+import kivy
+kivy.require('1.9.0')
+
+from kivy.config import Config
+Config.set('graphics', 'width', '1280')
+Config.set('graphics', 'height', '800')
+
 from kivy.app import App
 
 from kivy.core.window import Window
@@ -34,6 +41,14 @@ from functools import partial
 Duplex_Layout = True
 Force_Duplex_Layout = True
 
+# There is a limit of 20 transactions per second for this API.
+# Each GetMetricWidgetImage action has the following limits:
+#     As many as 100 metrics in the graph.
+#     Up to 100 KB uncompressed payload.
+
+# If zero, no auto-refresh, if greater than zero, the auto-refresh interval in seconds
+cw_remote_refresh_interval_seconds = 0 # (1 * 60)
+
 curdir = dirname(__file__)
 
 cw_remote_ini_file = open(join(curdir, "CW_Remote.ini"), "r")
@@ -46,6 +61,11 @@ cw_remote_ini = json.loads(cw_remote_ini_json, object_pairs_hook=OrderedDict)
 cw_remote_layout = cw_remote_ini.get("layout", '')
 if (cw_remote_layout == "paged"): Duplex_Layout = False
 elif (cw_remote_layout == "duplex"): Duplex_Layout = True
+
+if ("refresh_interval_seconds" in cw_remote_ini):
+    cw_remote_refresh_interval_seconds = cw_remote_ini["refresh_interval_seconds"]
+# Fractional seconds not supported
+cw_remote_refresh_interval_seconds = int(round(cw_remote_refresh_interval_seconds))
 
 if (Force_Duplex_Layout): Duplex_Layout = True
 
@@ -168,6 +188,9 @@ class Build_CloudWatch_Remote ( App ):
         super(Build_CloudWatch_Remote, self).__init__(**kwargs)
         Window.bind(on_key_down=self.on_keyboard_down)
 
+        # Window.size = (1280, 800)
+
+        # Automatically size widget images to fit screen real estate
         horizontal_size, vertical_size = Window.size
         # print ("h:", horizontal_size, "v:", vertical_size)
         for widget_descriptor in widget_descriptor_list:
@@ -234,8 +257,11 @@ class Build_CloudWatch_Remote ( App ):
             self.Upper_Widget_Box.add_widget(Image(texture=ci_widget_image_list[0].texture))
 
             self.CloudWatch_Remote.add_widget(self.Control_Bar)
-            self.CloudWatch_Remote.add_widget(self.Upper_Widget_Box) 
-        
+            self.CloudWatch_Remote.add_widget(self.Upper_Widget_Box)
+
+        if (cw_remote_refresh_interval_seconds >= 1):
+            Clock.schedule_interval(self.update, cw_remote_refresh_interval_seconds)
+
         return self.CloudWatch_Remote
         
     def on_begin_time_value_change(self, instance, begin_value, *args):
@@ -278,6 +304,7 @@ class Build_CloudWatch_Remote ( App ):
         # print("\nThe key", keycode, "have been pressed")
         # print(" - text is %r" % text)
         # print(" - modifiers are %r" % modifiers)
+        # Support keyboard control of carousel on OS-X
         if ((keycode == 81) or (keycode == 79)): self.Carousel_Widget.load_next()
         elif ((keycode == 82) or (keycode == 80)): self.Carousel_Widget.load_previous()
 

@@ -29,6 +29,10 @@ CW_Remote_Ini = OrderedDict()
 # Can be either "paged" or "duplex"
 CW_Remote_layout = "paged"
 
+# This auto-refreshes widgets every 60 seconds, set to zero for no auto-refresh
+CW_Remote_refresh_interval_seconds = 60
+
+
 # Set these values from AWS/IAM/Users "cloudwatch_widget_keyhole" which has been granted ...
 # ... "cloudwatch_widget_keyhole_policy".
 # This policy has been created with only "Read", "GetMetricWidgetImage" permission, ...
@@ -57,6 +61,7 @@ def Initialize_Widget_Descriptor ( this_widget_descriptor ):
 
 def main ( ):
     CW_Remote_Ini["layout"] = CW_Remote_layout
+    CW_Remote_Ini["refresh_interval_seconds"] = CW_Remote_refresh_interval_seconds
     CW_Remote_Ini["aws_access_id"] = CW_Remote_aws_access_id
     CW_Remote_Ini["aws_secret_key"] = CW_Remote_aws_secret_key
 
