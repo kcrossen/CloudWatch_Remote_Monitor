@@ -1,3 +1,9 @@
+#!/usr/bin/env python2.7
+# -*- encoding: utf-8 -*-
+
+from __future__ import print_function
+from __future__ import division
+
 import kivy
 kivy.require('1.9.0')
 
@@ -38,7 +44,7 @@ from collections import OrderedDict
 
 from functools import partial
 
-Duplex_Layout = True
+cw_remote_duplex_layout = True
 Force_Duplex_Layout = True
 
 # There is a limit of 20 transactions per second for this API.
@@ -48,6 +54,7 @@ Force_Duplex_Layout = True
 
 # If zero, no auto-refresh, if greater than zero, the auto-refresh interval in seconds
 cw_remote_refresh_interval_seconds = 0 # (1 * 60)
+Force_Refresh_Interval_Seconds = -1
 
 curdir = dirname(__file__)
 
@@ -59,15 +66,17 @@ cw_remote_ini_file.close()
 cw_remote_ini = json.loads(cw_remote_ini_json, object_pairs_hook=OrderedDict)
 
 cw_remote_layout = cw_remote_ini.get("layout", '')
-if (cw_remote_layout == "paged"): Duplex_Layout = False
-elif (cw_remote_layout == "duplex"): Duplex_Layout = True
+if (cw_remote_layout == "paged"): cw_remote_duplex_layout = False
+elif (cw_remote_layout == "duplex"): cw_remote_duplex_layout = True
 
 if ("refresh_interval_seconds" in cw_remote_ini):
     cw_remote_refresh_interval_seconds = cw_remote_ini["refresh_interval_seconds"]
+if (Force_Refresh_Interval_Seconds >= 0):
+    cw_remote_refresh_interval_seconds = Force_Refresh_Interval_Seconds
 # Fractional seconds not supported
 cw_remote_refresh_interval_seconds = int(round(cw_remote_refresh_interval_seconds))
 
-if (Force_Duplex_Layout): Duplex_Layout = True
+if (Force_Duplex_Layout): cw_remote_duplex_layout = True
 
 widget_descriptor_list = []
 
@@ -77,9 +86,9 @@ for widget_descr in ini_widget_descriptor_list:
     widget_descriptor_list.append(this_widget_descriptor)
 
 if (len(widget_descriptor_list) < 2): 
-    Duplex_Layout = False
+    cw_remote_duplex_layout = False
 
-if (Duplex_Layout):
+if (cw_remote_duplex_layout):
     # No way to page through these, reduce fetch effort/time
     widget_descriptor_list = widget_descriptor_list[:2]
 else: 
@@ -195,7 +204,7 @@ class Build_CloudWatch_Remote ( App ):
         # print ("h:", horizontal_size, "v:", vertical_size)
         for widget_descriptor in widget_descriptor_list:
             widget_descriptor["width"] = horizontal_size
-            if (Duplex_Layout):
+            if (cw_remote_duplex_layout):
                 widget_descriptor["height"] = int(round(vertical_size * 0.475))
             else:
                 widget_descriptor["height"] = int(round(vertical_size * 2 * 0.475))
@@ -235,7 +244,7 @@ class Build_CloudWatch_Remote ( App ):
         self.Control_Bar.add_widget(self.End_Time_Slider)
         self.Control_Bar.add_widget(self.End_Time_Label)
 
-        if (Duplex_Layout):
+        if (cw_remote_duplex_layout):
             self.Upper_Widget_Box = BoxLayout(orientation='vertical', size_hint=(1, 0.475))
             self.Lower_Widget_Box = BoxLayout(orientation='vertical', size_hint=(1, 0.475))
         
@@ -285,7 +294,7 @@ class Build_CloudWatch_Remote ( App ):
     def update(self, *args):
         Get_CloudWatch_Graphs()
 
-        if (Duplex_Layout):
+        if (cw_remote_duplex_layout):
             self.Upper_Widget_Box.clear_widgets()
             self.Upper_Widget_Box.add_widget(Image(texture=ci_widget_image_list[0].texture))
             self.Lower_Widget_Box.clear_widgets()
