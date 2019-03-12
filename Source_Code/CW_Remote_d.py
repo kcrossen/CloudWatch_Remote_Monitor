@@ -109,8 +109,6 @@ cloudwatch_client = \
                  aws_secret_access_key=cw_remote_ini.get("aws_secret_key", ''),
                  region_name=cw_remote_ini.get("region_name", ''))
 
-def bound(low, high, value):
-    return max(low, min(high, value))
 
 # Determine local wall time, this works for New York City
 class Time_Zone (datetime.tzinfo):
@@ -196,6 +194,12 @@ class Slider_Extended(Slider):
 # Build the app screen
 class Build_CloudWatch_Remote ( App ):
 
+    Period_Buttons = []
+    Period_End_Buttons = []
+
+    Period_Value = 24
+    Period_End_Value = 0
+
     def __init__(self, **kwargs):
         super(Build_CloudWatch_Remote, self).__init__(**kwargs)
         Window.bind(on_key_down=self.on_keyboard_down)
@@ -213,60 +217,58 @@ class Build_CloudWatch_Remote ( App ):
                 widget_descriptor["height"] = int(round(vertical_size * 2 * 0.475))
 
     def build(self):
-        self.Period_Value = 24
-        self.Period_Value_Steps = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 22, 24,
-                                   26, 28, 30, 32, 34, 36, 40, 44, 48,
-                                   52, 56, 60, 64, 68, 72,
-                                   76, 80, 86, 92, 96,
-                                   108, 114, 120,
-                                   132, 138, 144,
-                                   156, 160, 168]
-
-        self.Period_End_Value = 0
-        self.Period_End_Value_Steps = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 22, 24,
-                                       26, 28, 30, 32, 34, 36, 40, 44, 48,
-                                       52, 56, 60, 64, 68, 72,
-                                       76, 80, 86, 92, 96,
-                                       108, 114, 120,
-                                       132, 138, 144,
-                                       156, 160, 168]
-
-        self.update_period_start_end()
-
         Get_CloudWatch_Graphs()
 
         self.CloudWatch_Remote = BoxLayout(orientation='vertical')
 
         self.Control_Bar = BoxLayout(orientation='horizontal', size_hint=(1, 0.05))
 
-        self.Period_Label = Label(text=(str(self.Period_Value) + "H"), size_hint=(0.075, 1))
+        # self.Begin_Time_Slider = \
+        #     Slider_Extended(min=-24, max=-1, value=-24, step=1, size_hint=(0.40, 1))
+        # self.Begin_Time_Slider.bind(value=self.on_begin_time_value_change)
+        # self.Begin_Time_Slider.bind(on_release=self.update)
 
-        self.Period_Slider = \
-            Slider_Extended(min=-1000, max=-1,
-                            value=-(999 * (self.Period_Value_Steps.index(self.Period_Value) / len(self.Period_Value_Steps))),
-                            step=1,
-                            border_horizontal=[0, 0, 0, 0], padding=12, size_hint=(0.4, 1))
-        self.Period_Slider.bind(value=self.on_period_value_change)
-        self.Period_Slider.bind(on_release=self.update)
+        # self.Begin_Time_Label = \
+        #     Label(text=(str(int(round(self.Begin_Time_Slider.value))) + "H"),
+        #           size_hint=(0.05, 1))
+        self.Period_Label = Label(text=(str(self.Period_Value) + "H"), size_hint=(0.05, 1))
 
-        button_refresh = Button(text="Refresh", size_hint=(0.05, 1))
+        # self.Control_Bar.add_widget(self.Begin_Time_Label)
+        self.Control_Bar.add_widget(self.Period_Label)
+        # self.Control_Bar.add_widget(self.Begin_Time_Slider)
+        for button_idx, button_value in enumerate([120, 96, 72, 48, 24, 20, 16, 12, 8, 6, 5, 4, 3, 2, 1]):
+            period_button = Button(text=str(button_value))
+            period_button.font_size = 14
+            period_button.size_hint = (0.0375, 1)
+            period_button.bind(on_press=partial(self.on_set_period, button_idx, button_value))
+            self.Period_Buttons.append(period_button)
+            self.Control_Bar.add_widget(period_button)
+        
+        button_refresh = Button(text="Refresh", size_hint=(0.075, 1))
         button_refresh.font_size = 14
         button_refresh.bind(on_press=self.update)
-
-        self.Period_End_Slider = \
-            Slider_Extended(min=-1000, max=0, value=0, step=1,
-                            border_horizontal=[0, 0, 0, 0], padding=12, size_hint=(0.4, 1))
-        self.Period_End_Slider.bind(value=self.on_period_end_value_change)
-        self.Period_End_Slider.bind(on_release=self.update)
-
-        self.Period_End_Label = Label(text=(str(self.Period_End_Value) + "H ago"), size_hint=(0.075, 1))
-
-        self.Control_Bar.add_widget(self.Period_Label)
-        self.Control_Bar.add_widget(self.Period_Slider)
-
         self.Control_Bar.add_widget(button_refresh)
 
-        self.Control_Bar.add_widget(self.Period_End_Slider)
+        for button_idx, button_value in enumerate([-72, -48, -36, -24, -12, -10, -8, -6, -5, -4, -3, -2, -1, 0]): # -96,
+            end_button = Button(text=str(button_value))
+            end_button.font_size = 14
+            end_button.size_hint = (0.0375, 1)
+            end_button.bind(on_press=partial(self.on_set_period_end, button_idx, button_value))
+            self.Period_End_Buttons.append(end_button)
+            self.Control_Bar.add_widget(end_button)
+
+        # self.End_Time_Slider = \
+        #     Slider_Extended(min=-23, max=0, value=0, step=1, size_hint=(0.40, 1))
+        # self.End_Time_Slider.bind(value=self.on_end_time_value_change)
+        # self.End_Time_Slider.bind(on_release=self.update)
+
+        # self.End_Time_Label = \
+        #     Label(text=(str(int(round(self.End_Time_Slider.value))) + "H"),
+        #           size_hint=(0.05, 1))
+        self.Period_End_Label = Label(text=(str(self.Period_End_Value) + "H"), size_hint=(0.05, 1))
+
+        # self.Control_Bar.add_widget(self.End_Time_Slider)
+        # self.Control_Bar.add_widget(self.End_Time_Label)
         self.Control_Bar.add_widget(self.Period_End_Label)
 
         if (cw_remote_duplex_layout):
@@ -298,23 +300,40 @@ class Build_CloudWatch_Remote ( App ):
 
         return self.CloudWatch_Remote
 
-    def on_period_value_change(self, instance, period_slider_value, *args):
-        period_value_index = int(round(len(self.Period_Value_Steps) * (abs(period_slider_value) / 999)))
-        self.Period_Value = self.Period_Value_Steps[bound(0, (len(self.Period_Value_Steps) -1), period_value_index)]
-        self.Period_Label.text=(str(self.Period_Value) + "H")
+    def on_set_period(self, button_index, button_value, *args):
+        self.Period_Value = button_value
+        self.Period_Label.text = str(self.Period_Value) + "H"
         self.update_period_start_end()
 
-    def on_period_end_value_change(self, instance, period_end_slider_value, *args):
-        period_end_value_index = int(round(len(self.Period_End_Value_Steps) * (abs(period_end_slider_value) / 1000)))
-        self.Period_End_Value = self.Period_End_Value_Steps[bound(0, (len(self.Period_End_Value_Steps) -1), period_end_value_index)]
-        self.Period_End_Label.text=(str(self.Period_End_Value) + "H ago")
+    def on_set_period_end(self, button_index, button_value, *args):
+        self.Period_End_Value = button_value
+        self.Period_End_Label.text = str(self.Period_End_Value) + "H"
         self.update_period_start_end()
-        
+
     def update_period_start_end(self):
         for widget_descriptor in widget_descriptor_list:
             widget_descriptor["start"] = "-PT" + str(abs(self.Period_Value) + abs(self.Period_End_Value)) + "H"
             widget_descriptor["end"] = "-PT" + str(abs(self.Period_End_Value)) + "H"
+        self.update()
 
+    # def on_begin_time_value_change(self, instance, begin_value, *args):
+    #     relative_start_time_value = int(round(begin_value))
+    #     if (relative_start_time_value >= int(round(self.End_Time_Slider.value))):
+    #         relative_start_time_value = int(round(self.End_Time_Slider.value)) - 1
+    #         self.Begin_Time_Slider.value = relative_start_time_value
+    #     for widget_descriptor in widget_descriptor_list:
+    #         widget_descriptor["start"] = "-PT" + str(abs(relative_start_time_value)) + "H"
+    #     self.Begin_Time_Label.text = str(relative_start_time_value) + "H"
+    #
+    # def on_end_time_value_change(self, instance, end_value, *args):
+    #     relative_end_time_value = int(round(end_value))
+    #     if (relative_end_time_value <= int(round(self.Begin_Time_Slider.value))):
+    #         relative_end_time_value = int(round(self.Begin_Time_Slider.value)) + 1
+    #         self.End_Time_Slider.value = relative_end_time_value
+    #     for widget_descriptor in widget_descriptor_list:
+    #         widget_descriptor["end"] = "-PT" + str(abs(relative_end_time_value)) + "H"
+    #     self.End_Time_Label.text = str(relative_end_time_value) + "H"
+        
     def update(self, *args):
         Get_CloudWatch_Graphs()
 
