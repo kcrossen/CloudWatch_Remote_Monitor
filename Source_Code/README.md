@@ -12,9 +12,11 @@ kivy
 
 No luck getting Kivy's buildozer script to package for OSX. Here's how to do it by hand on OS-X 10.11.6 w/ Python 2.7.16, quickly and certainly:
 
-1) Install Kivy-1.10.1_osx10.13.5_builtin_python2_r1.dmg from https://github.com/kivy/kivy/releases
-2) Copy /Applications/Kivy2.app to ~/someplace_quiet as Kivy.app
-3) When you succeed, your app has your icon, but the windows it launches have the Kivy icon, create your own icon set:
+1a) Install Kivy-1.10.1_osx10.13.5_builtin_python2_r1.dmg from https://github.com/kivy/kivy/releases
+
+2b) Copy /Applications/Kivy2.app to ~/someplace_quiet as Kivy.app
+
+3c) When you succeed, your app has your icon, but the windows it launches have the Kivy icon, create your own icon set:
 ```
 appIcon.icns
 kivy-icon-64.ico
