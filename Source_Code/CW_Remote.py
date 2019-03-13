@@ -27,7 +27,7 @@ from kivy.uix.carousel import Carousel
 
 from kivy.clock import Clock
 
-from os.path import join, dirname
+from os.path import join, expanduser
 
 from io import BytesIO
 
@@ -56,9 +56,10 @@ Force_Duplex_Layout = True
 cw_remote_refresh_interval_seconds = 0 # (1 * 60)
 Force_Refresh_Interval_Seconds = -1
 
-curdir = dirname(__file__)
+home_dir = expanduser("~")
+ini_dir = "Documents/CW_Remote"
 
-cw_remote_ini_file = open(join(curdir, "CW_Remote.ini"), "r")
+cw_remote_ini_file = open(join(home_dir, ini_dir, "CW_Remote.ini"), "r")
 cw_remote_ini_json = cw_remote_ini_file.read()
 cw_remote_ini_file.close()
 
@@ -196,11 +197,26 @@ class Slider_Extended(Slider):
 # Build the app screen
 class Build_CloudWatch_Remote ( App ):
 
-    def __init__(self, **kwargs):
-        super(Build_CloudWatch_Remote, self).__init__(**kwargs)
-        Window.bind(on_key_down=self.on_keyboard_down)
+    def build(self):
+        self.Period_Value = 24
+        self.Period_Value_Steps = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, # 18
+                                   26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, # 12
+                                   50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, # 12
+                                   74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96, # 12
+                                   100, 104, 108, 112, 116, 120, # 6
+                                   124, 128, 132, 136, 140, 144, # 6
+                                   148, 152, 156, 160, 164, 168] # 6
 
-        # Window.size = (1280, 800)
+        self.Period_End_Value = 0
+        self.Period_End_Value_Steps = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, # 19
+                                       26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, # 12
+                                       50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, # 12
+                                       74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96, # 12
+                                       100, 104, 108, 112, 116, 120, # 6
+                                       124, 128, 132, 136, 140, 144, # 6
+                                       148, 152, 156, 160, 164, 168] # 6
+
+        Window.bind(on_key_down=self.on_keyboard_down)
 
         # Automatically size widget images to fit screen real estate
         horizontal_size, vertical_size = Window.size
@@ -212,25 +228,6 @@ class Build_CloudWatch_Remote ( App ):
             else:
                 widget_descriptor["height"] = int(round(vertical_size * 2 * 0.475))
 
-    def build(self):
-        self.Period_Value = 24
-        self.Period_Value_Steps = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 22, 24,
-                                   26, 28, 30, 32, 34, 36, 40, 44, 48,
-                                   52, 56, 60, 64, 68, 72,
-                                   76, 80, 86, 92, 96,
-                                   108, 114, 120,
-                                   132, 138, 144,
-                                   156, 160, 168]
-
-        self.Period_End_Value = 0
-        self.Period_End_Value_Steps = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 22, 24,
-                                       26, 28, 30, 32, 34, 36, 40, 44, 48,
-                                       52, 56, 60, 64, 68, 72,
-                                       76, 80, 86, 92, 96,
-                                       108, 114, 120,
-                                       132, 138, 144,
-                                       156, 160, 168]
-
         self.update_period_start_end()
 
         Get_CloudWatch_Graphs()
@@ -239,7 +236,8 @@ class Build_CloudWatch_Remote ( App ):
 
         self.Control_Bar = BoxLayout(orientation='horizontal', size_hint=(1, 0.05))
 
-        self.Period_Label = Label(text=(str(self.Period_Value) + "H"), size_hint=(0.075, 1))
+        self.Period_Label = \
+            Label(text=self.period_value_display(self.Period_Value), size_hint=(0.075, 1))
 
         self.Period_Slider = \
             Slider_Extended(min=-1000, max=-1,
@@ -259,7 +257,8 @@ class Build_CloudWatch_Remote ( App ):
         self.Period_End_Slider.bind(value=self.on_period_end_value_change)
         self.Period_End_Slider.bind(on_release=self.update)
 
-        self.Period_End_Label = Label(text=(str(self.Period_End_Value) + "H ago"), size_hint=(0.075, 1))
+        self.Period_End_Label = \
+            Label(text=(self.period_value_display(self.Period_End_Value) + " ago"), size_hint=(0.075, 1))
 
         self.Control_Bar.add_widget(self.Period_Label)
         self.Control_Bar.add_widget(self.Period_Slider)
@@ -298,24 +297,33 @@ class Build_CloudWatch_Remote ( App ):
 
         return self.CloudWatch_Remote
 
+    def period_value_display(self, Period_Value):
+        period_value_string = ""
+        if ((Period_Value // 24) > 0): period_value_string += str(Period_Value // 24) + "D"
+        if (((Period_Value % 24) > 0) or (len(period_value_string) == 0)):
+            if (len(period_value_string) > 0): period_value_string += " "
+            period_value_string += str(self.Period_Value % 24) + "H"
+        return period_value_string
+
     def on_period_value_change(self, instance, period_slider_value, *args):
         period_value_index = int(round(len(self.Period_Value_Steps) * (abs(period_slider_value) / 999)))
         self.Period_Value = self.Period_Value_Steps[bound(0, (len(self.Period_Value_Steps) -1), period_value_index)]
-        self.Period_Label.text=(str(self.Period_Value) + "H")
-        self.update_period_start_end()
+        self.Period_Label.text = (self.period_value_display(self.Period_Value))
+        # self.update_period_start_end()
 
     def on_period_end_value_change(self, instance, period_end_slider_value, *args):
         period_end_value_index = int(round(len(self.Period_End_Value_Steps) * (abs(period_end_slider_value) / 1000)))
         self.Period_End_Value = self.Period_End_Value_Steps[bound(0, (len(self.Period_End_Value_Steps) -1), period_end_value_index)]
-        self.Period_End_Label.text=(str(self.Period_End_Value) + "H ago")
-        self.update_period_start_end()
-        
+        self.Period_End_Label.text = (self.period_value_display(self.Period_End_Value) + " ago")
+        # self.update_period_start_end()
+
     def update_period_start_end(self):
         for widget_descriptor in widget_descriptor_list:
             widget_descriptor["start"] = "-PT" + str(abs(self.Period_Value) + abs(self.Period_End_Value)) + "H"
             widget_descriptor["end"] = "-PT" + str(abs(self.Period_End_Value)) + "H"
 
     def update(self, *args):
+        self.update_period_start_end()
         Get_CloudWatch_Graphs()
 
         if (cw_remote_duplex_layout):
