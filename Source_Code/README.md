@@ -35,7 +35,7 @@ kivy-icon-512.png
 
 4c) still at Contents/Resources, in Finder menu click New Folder, and name it yourapp
 
-4d) navigate to Contents/Resources/yourapp and copy your appIcon.icns there
+4d) navigate to Contents/Resources/yourapp and copy/replace your appIcon.icns there
 
 4e) navigate to Contents/Resources/kivy/kivy/data/logo and copy/replace *.png, *.ico above to there
 
