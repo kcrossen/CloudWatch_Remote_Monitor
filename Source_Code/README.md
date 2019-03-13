@@ -27,34 +27,34 @@ kivy-icon-128.png
 kivy-icon-256.png
 kivy-icon-512.png
 ```
-4) In Finder, right-click ~/someplace_quiet/Kivy.app:
+4a) In Finder, right-click ~/someplace_quiet/Kivy.app:
 
-4a) select "Show Package Contents", navigate to Contents/Resources and copy/replace appIcon.icns there
+4b) select "Show Package Contents", navigate to Contents/Resources and copy/replace appIcon.icns there
 
-4b) still at Contents/Resources, in Finder menu click New Folder, and name it yourapp
+4c) still at Contents/Resources, in Finder menu click New Folder, and name it yourapp
 
-4c) navigate to Contents/Resources/yourapp and copy your appIcon.icns there
+4d) navigate to Contents/Resources/yourapp and copy your appIcon.icns there
 
-4d) navigate to Contents/Resources/kivy/kivy/data/logo and copy/replace *.png, *.ico above to there
+4e) navigate to Contents/Resources/kivy/kivy/data/logo and copy/replace *.png, *.ico above to there
 
-4e) select anything in Contents/Resource rght-click and pick Get Info, selct all of the "Where:" entry and copy
+4f) select anything in Contents/Resource rght-click and pick Get Info, selct all of the "Where:" entry and copy
 
-4f) in another Finder tab on Finder menu, Go, Go to Folder..., paste and type in /.kivy, Go
+4g) in another Finder tab on Finder menu, Go, Go to Folder..., paste and type in /.kivy, Go
 
-4g) navigate to icon directory and copy/replace *.png, *.ico as above to there 
+4h) navigate to icon directory and copy/replace *.png, *.ico as above to there 
 
-5) select anything in Contents/Resources/venv rght-click and pick Get Info, selct all of the "Where:" entry and copy
+5a) select anything in Contents/Resources/venv rght-click and pick Get Info, selct all of the "Where:" entry and copy
 
-5a) start your terminal, iTerm2 in my case, 
+5b) start your terminal, iTerm2 in my case, 
 
-5b) cd <paste what you copied> 
+5c) cd <paste what you copied> 
   
-5c) for each dependency, in my case urllib3, botocore, boto3, do
+5d) for each dependency, in my case urllib3, botocore, boto3, do
 
-5d) pip install urllib3 -t ., and same for all of your dependencies
+5e) pip install urllib3 -t ., and same for all of your dependencies
   
-6) I'm using PyCharm to develop, so I take a copy of my working script, CW_Rempote.py and rename it main.py
+6a) I'm using PyCharm to develop, so I take a copy of my working script, CW_Rempote.py and rename it main.py
 
-6a) copy this new main.py to Contents/Resources/yourapp as in 4c) above.
+6b) copy this new main.py to Contents/Resources/yourapp as in 4c) above.
 
-7) Should work if the directions were followed.
+7a) Should work if the directions were followed.
