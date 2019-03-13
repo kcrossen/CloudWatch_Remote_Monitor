@@ -47,7 +47,7 @@ kivy-icon-512.png
 
 5b) start your terminal, iTerm2 in my case, 
 
-5c) cd <paste what you copied> 
+5c) cd **paste what you copied** 
   
 5d) for each dependency, in my case urllib3, botocore, boto3, do
 
