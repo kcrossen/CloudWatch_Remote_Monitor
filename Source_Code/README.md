@@ -57,6 +57,6 @@ kivy-icon-512.png
   
 6a) I'm using PyCharm to develop, so I take a copy of my working script, CW_Rempote.py and rename it main.py
 
-6b) copy this new main.py to Contents/Resources/yourapp as in 4c) above.
+6b) copy this new main.py to Contents/Resources/yourapp as in 4d) above.
 
 7a) Should work if the directions were followed.
