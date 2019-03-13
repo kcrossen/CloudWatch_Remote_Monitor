@@ -27,12 +27,11 @@ from kivy.uix.carousel import Carousel
 
 from kivy.clock import Clock
 
-from os.path import join, expanduser
+from os.path import dirname, isdir, isfile, join, expanduser
 
 from io import BytesIO
 
 import datetime
-import time
 
 import boto3
 
@@ -56,10 +55,15 @@ Force_Duplex_Layout = True
 cw_remote_refresh_interval_seconds = 0 # (1 * 60)
 Force_Refresh_Interval_Seconds = -1
 
-home_dir = expanduser("~")
-ini_dir = "Documents/CW_Remote"
+script_directory = dirname(__file__)
+if (isfile(join(script_directory, "CW_Remote.ini"))):
+    ini_directory = script_directory
+else:
+    home_dir = expanduser("~")
+    ini_dir = "Documents/CW_Remote"
+    ini_directory = join(home_dir, ini_dir)
 
-cw_remote_ini_file = open(join(home_dir, ini_dir, "CW_Remote.ini"), "r")
+cw_remote_ini_file = open(join(ini_directory, "CW_Remote.ini"), "r")
 cw_remote_ini_json = cw_remote_ini_file.read()
 cw_remote_ini_file.close()
 
@@ -110,11 +114,11 @@ cloudwatch_client = \
                  aws_secret_access_key=cw_remote_ini.get("aws_secret_key", ''),
                  region_name=cw_remote_ini.get("region_name", ''))
 
-def bound(low, high, value):
+def bound ( low, high, value ):
     return max(low, min(high, value))
 
 # Determine local wall time, this works for New York City
-class Time_Zone (datetime.tzinfo):
+class Time_Zone ( datetime.tzinfo ):
     def __init__(self, offset_in_minutes):
         super(Time_Zone, self).__init__()
         self.offset = offset_in_minutes
@@ -179,7 +183,7 @@ def Get_CloudWatch_Graphs ( ):
 
 # This slider extension allows the code to avoid the very expensive refreshes of ...
 # ... the widget images until the user has stopped sliding the slider. Refresh then.
-class Slider_Extended(Slider):
+class Slider_Extended ( Slider ):
     def __init__(self, **kwargs):
         self.register_event_type('on_release')
         super(Slider_Extended, self).__init__(**kwargs)
@@ -195,10 +199,10 @@ class Slider_Extended(Slider):
 
 
 # Build the app screen
-class Build_CloudWatch_Remote ( App ):
+class CW_Remote ( App ):
 
     def build(self):
-        self.Period_Value = 24
+        self.Period_Value = self.Period_Value = cw_remote_ini.get("initial_period_hours", 24)
         self.Period_Value_Steps = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, # 18
                                    26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, # 12
                                    50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, # 12
@@ -297,7 +301,7 @@ class Build_CloudWatch_Remote ( App ):
 
         return self.CloudWatch_Remote
 
-    def period_value_display(self, Period_Value):
+    def period_value_display ( self, Period_Value ):
         period_value_string = ""
         if ((Period_Value // 24) > 0): period_value_string += str(Period_Value // 24) + "D"
         if (((Period_Value % 24) > 0) or (len(period_value_string) == 0)):
@@ -305,24 +309,24 @@ class Build_CloudWatch_Remote ( App ):
             period_value_string += str(self.Period_Value % 24) + "H"
         return period_value_string
 
-    def on_period_value_change(self, instance, period_slider_value, *args):
+    def on_period_value_change ( self, instance, period_slider_value, *args ):
         period_value_index = int(round(len(self.Period_Value_Steps) * (abs(period_slider_value) / 999)))
         self.Period_Value = self.Period_Value_Steps[bound(0, (len(self.Period_Value_Steps) -1), period_value_index)]
         self.Period_Label.text = (self.period_value_display(self.Period_Value))
         # self.update_period_start_end()
 
-    def on_period_end_value_change(self, instance, period_end_slider_value, *args):
+    def on_period_end_value_change ( self, instance, period_end_slider_value, *args ):
         period_end_value_index = int(round(len(self.Period_End_Value_Steps) * (abs(period_end_slider_value) / 1000)))
         self.Period_End_Value = self.Period_End_Value_Steps[bound(0, (len(self.Period_End_Value_Steps) -1), period_end_value_index)]
         self.Period_End_Label.text = (self.period_value_display(self.Period_End_Value) + " ago")
         # self.update_period_start_end()
 
-    def update_period_start_end(self):
+    def update_period_start_end ( self ):
         for widget_descriptor in widget_descriptor_list:
             widget_descriptor["start"] = "-PT" + str(abs(self.Period_Value) + abs(self.Period_End_Value)) + "H"
             widget_descriptor["end"] = "-PT" + str(abs(self.Period_End_Value)) + "H"
 
-    def update(self, *args):
+    def update ( self, *args ):
         self.update_period_start_end()
         Get_CloudWatch_Graphs()
 
@@ -341,7 +345,7 @@ class Build_CloudWatch_Remote ( App ):
         
         self.CloudWatch_Remote.canvas.ask_update()
 
-    def on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
+    def on_keyboard_down ( self, instance, keyboard, keycode, text, modifiers ):
         # print("\nThe key", keycode, "have been pressed")
         # print(" - text is %r" % text)
         # print(" - modifiers are %r" % modifiers)
@@ -352,5 +356,5 @@ class Build_CloudWatch_Remote ( App ):
 
 # Instantiate and run the kivy app
 if __name__ == '__main__':
-    Build_CloudWatch_Remote().run()
+    CW_Remote().run()
     
