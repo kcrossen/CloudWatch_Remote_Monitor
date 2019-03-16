@@ -20,10 +20,11 @@ from kivy.core.image import Image as CoreImage
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.image import Image
-from kivy.uix.widget import Widget
+# from kivy.uix.widget import Widget
 from kivy.uix.slider import Slider
 from kivy.uix.label import Label
 from kivy.uix.carousel import Carousel
+from kivy.uix.textinput import TextInput
 
 from kivy.clock import Clock
 
@@ -37,11 +38,70 @@ import boto3
 
 import json
 
-import re
+# import re
 
 from collections import OrderedDict
 
-from functools import partial
+# from functools import partial
+
+
+# Example of supporting imported non-library modules
+# import sys
+# current_script_path = sys.path[0]
+#
+# sys.path.append(join(current_script_path, "Wall_Time"))
+# from Wall_Time import NYC_Wall_DateTime_Offset, UTC_Time_Zone
+
+cw_remote_initialization_example = \
+"""
+{
+    "layout": "paged",
+    
+    "refresh_interval_seconds": 60,
+    
+    "initial_period_hours": 24,
+
+    "aws_access_id": "xxxxxxxxxxxxxxxxxxxx",
+    "aws_secret_key": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "region_name": "xxxxxxxxx",
+
+    "widget_descriptor_list": [
+        {
+            "metrics": [
+                [ "AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "xxxxxxxxxxxxxxxxxxx", { "color": "#d62728", "stat": "Maximum", "period": 60, "yAxis": "right" } ],
+                [ "...", "xxxxxxxxxxxxxxxxxxx", { "stat": "Maximum", "period": 60, "yAxis": "left", "color": "#aec7e8" } ],
+                [ "...", "xxxxxxxxxxxxxxxxxxx", { "stat": "Maximum", "period": 60, "color": "#ff7f0e", "yAxis": "right" } ]
+            ],
+            "start": "-PT24H",
+            "timezone": "-0500",
+            "width": 1280,
+            "height": 380,
+            "view": "timeSeries",
+            "stacked": false,
+            "region": "xxxxxxxxx",
+            "title": "New CPU (max)",
+            "period": 300
+        },
+        {
+            "metrics": [
+                [ "AWS/RDS", "WriteIOPS", "DBInstanceIdentifier", "xxxxxxxxxxxxxxxxxxx", { "stat": "Maximum", "period": 60, "yAxis": "right", "color": "#d62728" } ],
+                [ "AWS/RDS", "ReadIOPS", "DBInstanceIdentifier", "xxxxxxxxxxxxxxxxxxx", { "stat": "Maximum", "period": 60, "color": "#1f77b4" } ],
+                [ "AWS/RDS", "ReadIOPS", "DBInstanceIdentifier", "xxxxxxxxxxxxxxxxxxx", { "stat": "Maximum", "period": 60 } ],
+                [ "AWS/RDS", "WriteIOPS", "DBInstanceIdentifier", "xxxxxxxxxxxxxxxxxxx", { "stat": "Maximum", "period": 60, "yAxis": "right", "color": "#ff7f0e" } ]
+            ],
+            "start": "-PT24H",
+            "timezone": "-0500",
+            "width": 1280,
+            "height": 380,
+            "view": "timeSeries",
+            "stacked": false,
+            "region": "xxxxxxxxx",
+            "title": "New IO (max)",
+            "period": 300
+        }
+    ]
+}
+"""
 
 cw_remote_duplex_layout = True
 Force_Duplex_Layout = True
@@ -55,67 +115,75 @@ Force_Duplex_Layout = True
 cw_remote_refresh_interval_seconds = 0 # (1 * 60)
 Force_Refresh_Interval_Seconds = -1
 
+cw_remote_ini = None
 script_directory = dirname(__file__)
-if (isfile(join(script_directory, "CW_Remote.ini"))):
-    ini_directory = script_directory
-else:
-    home_dir = expanduser("~")
-    ini_dir = "Documents/CW_Remote"
-    ini_directory = join(home_dir, ini_dir)
 
-cw_remote_ini_file = open(join(ini_directory, "CW_Remote.ini"), "r")
-cw_remote_ini_json = cw_remote_ini_file.read()
-cw_remote_ini_file.close()
+try:
+    if (isfile(join(script_directory, "CW_Remote.ini"))):
+        ini_directory = script_directory
+    else:
+        home_dir = expanduser("~")
+        ini_dir = "Documents/CW_Remote"
+        ini_directory = join(home_dir, ini_dir)
 
-# Load initialization from the JSON ini file
-cw_remote_ini = json.loads(cw_remote_ini_json, object_pairs_hook=OrderedDict)
+    cw_remote_ini_file = open(join(ini_directory, "CW_Remote.ini"), "r")
+    cw_remote_ini_json = cw_remote_ini_file.read()
+    cw_remote_ini_file.close()
 
-cw_remote_layout = cw_remote_ini.get("layout", '')
-if (cw_remote_layout == "paged"): cw_remote_duplex_layout = False
-elif (cw_remote_layout == "duplex"): cw_remote_duplex_layout = True
+    # Load initialization from the JSON ini file
+    cw_remote_ini = json.loads(cw_remote_ini_json, object_pairs_hook=OrderedDict)
 
-if ("refresh_interval_seconds" in cw_remote_ini):
-    cw_remote_refresh_interval_seconds = cw_remote_ini["refresh_interval_seconds"]
-if (Force_Refresh_Interval_Seconds >= 0):
-    cw_remote_refresh_interval_seconds = Force_Refresh_Interval_Seconds
-# Fractional seconds not supported
-cw_remote_refresh_interval_seconds = int(round(cw_remote_refresh_interval_seconds))
+    cw_remote_layout = cw_remote_ini.get("layout", '')
+    if (cw_remote_layout == "paged"): cw_remote_duplex_layout = False
+    elif (cw_remote_layout == "duplex"): cw_remote_duplex_layout = True
 
-if (Force_Duplex_Layout): cw_remote_duplex_layout = True
+    if ("refresh_interval_seconds" in cw_remote_ini):
+        cw_remote_refresh_interval_seconds = cw_remote_ini["refresh_interval_seconds"]
+    if (Force_Refresh_Interval_Seconds >= 0):
+        cw_remote_refresh_interval_seconds = Force_Refresh_Interval_Seconds
+    # Fractional seconds not supported
+    cw_remote_refresh_interval_seconds = int(round(cw_remote_refresh_interval_seconds))
 
-widget_descriptor_list = []
+    if (Force_Duplex_Layout): cw_remote_duplex_layout = True
 
-ini_widget_descriptor_list = cw_remote_ini.get("widget_descriptor_list", [])
-for widget_descr in ini_widget_descriptor_list:
-    this_widget_descriptor = widget_descr.copy()
-    widget_descriptor_list.append(this_widget_descriptor)
+    widget_descriptor_list = []
 
-if (len(widget_descriptor_list) < 2): 
-    cw_remote_duplex_layout = False
+    ini_widget_descriptor_list = cw_remote_ini.get("widget_descriptor_list", [])
+    for widget_descr in ini_widget_descriptor_list:
+        this_widget_descriptor = widget_descr.copy()
+        widget_descriptor_list.append(this_widget_descriptor)
 
-if (cw_remote_duplex_layout):
-    # No way to page through these, reduce fetch effort/time
-    widget_descriptor_list = widget_descriptor_list[:2]
-else: 
-    # Not duplex, make graphs "higher", i.e. more vertical resolution
-    for widget_descr in widget_descriptor_list:
-        widget_descr["height"] = 2 * widget_descr["height"]
+    if (len(widget_descriptor_list) < 2):
+        cw_remote_duplex_layout = False
 
-
-ci_widget_image_list = []
-for idx in range(len(widget_descriptor_list)):
-    ci_widget_image_list.append(None)
+    if (cw_remote_duplex_layout):
+        # No way to page through these, reduce fetch effort/time
+        widget_descriptor_list = widget_descriptor_list[:2]
+    else:
+        # Not duplex, make graphs "higher", i.e. more vertical resolution
+        for widget_descr in widget_descriptor_list:
+            widget_descr["height"] = 2 * widget_descr["height"]
 
 
-# Initialize connection to CloudWatch.
-cloudwatch_client = \
-    boto3.client('cloudwatch',
-                 aws_access_key_id=cw_remote_ini.get("aws_access_id", ''),
-                 aws_secret_access_key=cw_remote_ini.get("aws_secret_key", ''),
-                 region_name=cw_remote_ini.get("region_name", ''))
+    ci_widget_image_list = []
+    for idx in range(len(widget_descriptor_list)):
+        ci_widget_image_list.append(None)
+
+
+    # Initialize connection to CloudWatch.
+    cloudwatch_client = \
+        boto3.client('cloudwatch',
+                     aws_access_key_id=cw_remote_ini.get("aws_access_id", ''),
+                     aws_secret_access_key=cw_remote_ini.get("aws_secret_key", ''),
+                     region_name=cw_remote_ini.get("region_name", ''))
+except:
+    # If initialization file is missing, don't build usual UI
+    cw_remote_ini = None
+
 
 def bound ( low, high, value ):
     return max(low, min(high, value))
+
 
 # Determine local wall time, this works for New York City
 class Time_Zone ( datetime.tzinfo ):
@@ -202,17 +270,9 @@ class Slider_Extended ( Slider ):
 class CW_Remote ( App ):
 
     def build(self):
-        self.Period_Value = self.Period_Value = cw_remote_ini.get("initial_period_hours", 24)
-        self.Period_Value_Steps = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, # 18
-                                   26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, # 12
-                                   50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, # 12
-                                   74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96, # 12
-                                   100, 104, 108, 112, 116, 120, # 6
-                                   124, 128, 132, 136, 140, 144, # 6
-                                   148, 152, 156, 160, 164, 168] # 6
-
-        self.Period_End_Value = 0
-        self.Period_End_Value_Steps = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, # 19
+        if (cw_remote_ini is not None):
+            self.Period_Value = self.Period_Value = cw_remote_ini.get("initial_period_hours", 24)
+            self.Period_Value_Steps = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, # 18
                                        26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, # 12
                                        50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, # 12
                                        74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96, # 12
@@ -220,24 +280,80 @@ class CW_Remote ( App ):
                                        124, 128, 132, 136, 140, 144, # 6
                                        148, 152, 156, 160, 164, 168] # 6
 
-        Window.bind(on_key_down=self.on_keyboard_down)
+            self.Period_End_Value = 0
+            self.Period_End_Value_Steps = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, # 19
+                                           26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, # 12
+                                           50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, # 12
+                                           74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96, # 12
+                                           100, 104, 108, 112, 116, 120, # 6
+                                           124, 128, 132, 136, 140, 144, # 6
+                                           148, 152, 156, 160, 164, 168] # 6
 
-        # Automatically size widget images to fit screen real estate
-        horizontal_size, vertical_size = Window.size
-        # print ("h:", horizontal_size, "v:", vertical_size)
-        for widget_descriptor in widget_descriptor_list:
-            widget_descriptor["width"] = horizontal_size
+            Window.bind(on_key_down=self.on_keyboard_down)
+
+            # Automatically size widget images to fit screen real estate
+            horizontal_size, vertical_size = Window.size
+            # print ("h:", horizontal_size, "v:", vertical_size)
+            for widget_descriptor in widget_descriptor_list:
+                widget_descriptor["width"] = horizontal_size
+                if (cw_remote_duplex_layout):
+                    widget_descriptor["height"] = int(round(vertical_size * 0.475))
+                else:
+                    widget_descriptor["height"] = int(round(vertical_size * 2 * 0.475))
+
+            self.update_period_start_end()
+
+            Get_CloudWatch_Graphs()
+
+            self.CloudWatch_Remote = BoxLayout(orientation='vertical')
+
+            self.build_control_bar()
+
             if (cw_remote_duplex_layout):
-                widget_descriptor["height"] = int(round(vertical_size * 0.475))
+                self.Upper_Widget_Box = BoxLayout(orientation='vertical', size_hint=(1, 0.475))
+                self.Lower_Widget_Box = BoxLayout(orientation='vertical', size_hint=(1, 0.475))
+
+                self.Upper_Widget_Box.add_widget(Image(texture=ci_widget_image_list[0].texture))
+                self.Lower_Widget_Box.add_widget(Image(texture=ci_widget_image_list[1].texture))
+
+                self.CloudWatch_Remote.add_widget(self.Upper_Widget_Box)
+                self.CloudWatch_Remote.add_widget(self.Control_Bar)
+                self.CloudWatch_Remote.add_widget(self.Lower_Widget_Box)
+            elif (len(widget_descriptor_list) > 1):
+                self.Carousel_Widget = Carousel(direction='bottom')
+                for ci_widget_image in ci_widget_image_list:
+                    self.Carousel_Widget.add_widget(Image(texture=ci_widget_image.texture))
+
+                self.CloudWatch_Remote.add_widget(self.Control_Bar)
+                self.CloudWatch_Remote.add_widget(self.Carousel_Widget)
             else:
-                widget_descriptor["height"] = int(round(vertical_size * 2 * 0.475))
+                self.Upper_Widget_Box = BoxLayout(orientation='vertical', size_hint=(1, (2 * 0.475)))
+                self.Upper_Widget_Box.add_widget(Image(texture=ci_widget_image_list[0].texture))
 
-        self.update_period_start_end()
+                self.CloudWatch_Remote.add_widget(self.Control_Bar)
+                self.CloudWatch_Remote.add_widget(self.Upper_Widget_Box)
 
-        Get_CloudWatch_Graphs()
+            if (cw_remote_refresh_interval_seconds >= 1):
+                Clock.schedule_interval(self.update, cw_remote_refresh_interval_seconds)
 
-        self.CloudWatch_Remote = BoxLayout(orientation='vertical')
+            return self.CloudWatch_Remote
 
+        else:
+            self.CloudWatch_Remote = BoxLayout(orientation='vertical')
+
+            cw_remote_initialization_example_label = \
+                Label(text="CW_Remote requires an initialization file 'CW_Remote.ini' to function, see example below:", size_hint=(1, 0.03))
+
+            cw_remote_initialization_example_textinput = \
+                TextInput(text=cw_remote_initialization_example.strip(),
+                          multiline=True, readonly=True, allow_copy=True, size_hint=(1, 0.97))
+
+            self.CloudWatch_Remote.add_widget(cw_remote_initialization_example_label)
+            self.CloudWatch_Remote.add_widget(cw_remote_initialization_example_textinput)
+
+            return self.CloudWatch_Remote
+
+    def build_control_bar ( self ):
         self.Control_Bar = BoxLayout(orientation='horizontal', size_hint=(1, 0.05))
 
         self.Period_Label = \
@@ -245,7 +361,8 @@ class CW_Remote ( App ):
 
         self.Period_Slider = \
             Slider_Extended(min=-1000, max=-1,
-                            value=-(999 * (self.Period_Value_Steps.index(self.Period_Value) / len(self.Period_Value_Steps))),
+                            value=-(999 * (self.Period_Value_Steps.index(self.Period_Value) / len(
+                                self.Period_Value_Steps))),
                             step=1,
                             border_horizontal=[0, 0, 0, 0], padding=12, size_hint=(0.4, 1))
         self.Period_Slider.bind(value=self.on_period_value_change)
@@ -271,35 +388,6 @@ class CW_Remote ( App ):
 
         self.Control_Bar.add_widget(self.Period_End_Slider)
         self.Control_Bar.add_widget(self.Period_End_Label)
-
-        if (cw_remote_duplex_layout):
-            self.Upper_Widget_Box = BoxLayout(orientation='vertical', size_hint=(1, 0.475))
-            self.Lower_Widget_Box = BoxLayout(orientation='vertical', size_hint=(1, 0.475))
-        
-            self.Upper_Widget_Box.add_widget(Image(texture=ci_widget_image_list[0].texture))
-            self.Lower_Widget_Box.add_widget(Image(texture=ci_widget_image_list[1].texture))
-
-            self.CloudWatch_Remote.add_widget(self.Upper_Widget_Box) 
-            self.CloudWatch_Remote.add_widget(self.Control_Bar)
-            self.CloudWatch_Remote.add_widget(self.Lower_Widget_Box)
-        elif (len(widget_descriptor_list) > 1):
-            self.Carousel_Widget = Carousel(direction='bottom') 
-            for ci_widget_image in ci_widget_image_list:
-                self.Carousel_Widget.add_widget(Image(texture=ci_widget_image.texture))
-
-            self.CloudWatch_Remote.add_widget(self.Control_Bar)
-            self.CloudWatch_Remote.add_widget(self.Carousel_Widget) 
-        else:
-            self.Upper_Widget_Box = BoxLayout(orientation='vertical', size_hint=(1, (2 * 0.475)))
-            self.Upper_Widget_Box.add_widget(Image(texture=ci_widget_image_list[0].texture))
-
-            self.CloudWatch_Remote.add_widget(self.Control_Bar)
-            self.CloudWatch_Remote.add_widget(self.Upper_Widget_Box)
-
-        if (cw_remote_refresh_interval_seconds >= 1):
-            Clock.schedule_interval(self.update, cw_remote_refresh_interval_seconds)
-
-        return self.CloudWatch_Remote
 
     def period_value_display ( self, Period_Value ):
         period_value_string = ""
