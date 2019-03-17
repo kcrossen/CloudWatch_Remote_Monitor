@@ -38,5 +38,5 @@ Next, from this very repository, download and unzip Kivy-OSX-Build_Kit.zip,
 $ cd <Kivy-OSX-Build_Kit>
 ```
 
-### Read READ_ME_FIRST.txt, I mean really, read that first and follow the directions therein.
+### Read READ_ME_FIRST.txt, I mean really first. Read that first and follow the directions. ###
 You will build get an OSX app that has my icon, admittedly not great. You can Google instructions for making your own icon source files. The process is quite simple and monumentally boring, but they get the job done in maybe 30 minutes.
