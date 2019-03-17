@@ -11,6 +11,8 @@ from kivy.config import Config
 Config.set('graphics', 'width', '1280')
 Config.set('graphics', 'height', '800')
 
+from kivy.utils import platform as Kivy_Platform
+
 from kivy.app import App
 
 from kivy.core.window import Window
@@ -29,6 +31,7 @@ from kivy.uix.textinput import TextInput
 from kivy.clock import Clock
 
 from os.path import dirname, isdir, isfile, join, expanduser
+import platform
 
 from io import BytesIO
 
@@ -115,71 +118,102 @@ Force_Duplex_Layout = True
 cw_remote_refresh_interval_seconds = 0 # (1 * 60)
 Force_Refresh_Interval_Seconds = -1
 
+cw_remote_ini_json = ""
 cw_remote_ini = None
 script_directory = dirname(__file__)
+os_platform = platform.system()
 
-try:
-    if (isfile(join(script_directory, "CW_Remote.ini"))):
-        ini_directory = script_directory
-    else:
-        home_dir = expanduser("~")
-        ini_dir = "Documents/CW_Remote"
-        ini_directory = join(home_dir, ini_dir)
+if (os_platform == "Darwin"):
+    try:
+        if (isfile(join(script_directory, "CW_Remote.ini"))):
+            ini_directory = script_directory
+        else:
+            home_dir = expanduser("~")
+            ini_dir = "Documents/CW_Remote"
+            ini_directory = join(home_dir, ini_dir)
 
-    cw_remote_ini_file = open(join(ini_directory, "CW_Remote.ini"), "r")
-    cw_remote_ini_json = cw_remote_ini_file.read()
-    cw_remote_ini_file.close()
+        cw_remote_ini_file = open(join(ini_directory, "CW_Remote.ini"), "r")
+        cw_remote_ini_json = cw_remote_ini_file.read()
+        cw_remote_ini_file.close()
 
-    # Load initialization from the JSON ini file
-    cw_remote_ini = json.loads(cw_remote_ini_json, object_pairs_hook=OrderedDict)
+    except:
+        cw_remote_ini_json = ""
 
-    cw_remote_layout = cw_remote_ini.get("layout", '')
-    if (cw_remote_layout == "paged"): cw_remote_duplex_layout = False
-    elif (cw_remote_layout == "duplex"): cw_remote_duplex_layout = True
+elif (os_platform == "Linux"):
+    if (Kivy_Platform == "android"):
+        try:
+            documents_dir = "/system/storage/emulated/0/Documents"
+            ini_dir = "CW_Remote"
+            ini_directory = join(documents_dir, ini_dir)
 
-    if ("refresh_interval_seconds" in cw_remote_ini):
-        cw_remote_refresh_interval_seconds = cw_remote_ini["refresh_interval_seconds"]
-    if (Force_Refresh_Interval_Seconds >= 0):
-        cw_remote_refresh_interval_seconds = Force_Refresh_Interval_Seconds
-    # Fractional seconds not supported
-    cw_remote_refresh_interval_seconds = int(round(cw_remote_refresh_interval_seconds))
+            cw_remote_ini_file = open(join(ini_directory, "CW_Remote.ini"), "r")
+            cw_remote_ini_json = cw_remote_ini_file.read()
+            cw_remote_ini_file.close()
 
-    if (Force_Duplex_Layout): cw_remote_duplex_layout = True
+        except:
+            cw_remote_ini_json = ""
 
-    widget_descriptor_list = []
+elif (os_platform == "Windows"):
+    cw_remote_ini_json = ""
 
-    ini_widget_descriptor_list = cw_remote_ini.get("widget_descriptor_list", [])
-    for widget_descr in ini_widget_descriptor_list:
-        this_widget_descriptor = widget_descr.copy()
-        widget_descriptor_list.append(this_widget_descriptor)
+else:
+    cw_remote_ini_json = ""
 
-    if (len(widget_descriptor_list) < 2):
-        cw_remote_duplex_layout = False
+if (len(cw_remote_ini_json) > 0):
+    # This should be the same for any OS platform, ...
+    # ... but may still fail by being ill-structured
+    try:
+        # Load initialization from the JSON ini file
+        cw_remote_ini = json.loads(cw_remote_ini_json, object_pairs_hook=OrderedDict)
 
-    if (cw_remote_duplex_layout):
-        # No way to page through these, reduce fetch effort/time
-        widget_descriptor_list = widget_descriptor_list[:2]
-    else:
-        # Not duplex, make graphs "higher", i.e. more vertical resolution
-        for widget_descr in widget_descriptor_list:
-            widget_descr["height"] = 2 * widget_descr["height"]
+        cw_remote_layout = cw_remote_ini.get("layout", '')
+        if (cw_remote_layout == "paged"): cw_remote_duplex_layout = False
+        elif (cw_remote_layout == "duplex"): cw_remote_duplex_layout = True
+
+        if ("refresh_interval_seconds" in cw_remote_ini):
+            cw_remote_refresh_interval_seconds = cw_remote_ini["refresh_interval_seconds"]
+        if (Force_Refresh_Interval_Seconds >= 0):
+            cw_remote_refresh_interval_seconds = Force_Refresh_Interval_Seconds
+        # Fractional seconds not supported
+        cw_remote_refresh_interval_seconds = int(round(cw_remote_refresh_interval_seconds))
+
+        if (Force_Duplex_Layout): cw_remote_duplex_layout = True
+
+        widget_descriptor_list = []
+
+        ini_widget_descriptor_list = cw_remote_ini.get("widget_descriptor_list", [])
+        for widget_descr in ini_widget_descriptor_list:
+            this_widget_descriptor = widget_descr.copy()
+            widget_descriptor_list.append(this_widget_descriptor)
+
+        if (len(widget_descriptor_list) < 2):
+            cw_remote_duplex_layout = False
+
+        if (cw_remote_duplex_layout):
+            # No way to page through these, reduce fetch effort/time
+            widget_descriptor_list = widget_descriptor_list[:2]
+        else:
+            # Not duplex, make graphs "higher", i.e. more vertical resolution
+            for widget_descr in widget_descriptor_list:
+                widget_descr["height"] = 2 * widget_descr["height"]
 
 
-    ci_widget_image_list = []
-    for idx in range(len(widget_descriptor_list)):
-        ci_widget_image_list.append(None)
+        ci_widget_image_list = []
+        for idx in range(len(widget_descriptor_list)):
+            ci_widget_image_list.append(None)
 
 
-    # Initialize connection to CloudWatch.
-    cloudwatch_client = \
-        boto3.client('cloudwatch',
-                     aws_access_key_id=cw_remote_ini.get("aws_access_id", ''),
-                     aws_secret_access_key=cw_remote_ini.get("aws_secret_key", ''),
-                     region_name=cw_remote_ini.get("region_name", ''))
-except:
-    # If initialization file is missing, don't build usual UI
+        # Initialize connection to CloudWatch.
+        cloudwatch_client = \
+            boto3.client('cloudwatch',
+                         aws_access_key_id=cw_remote_ini.get("aws_access_id", ''),
+                         aws_secret_access_key=cw_remote_ini.get("aws_secret_key", ''),
+                         region_name=cw_remote_ini.get("region_name", ''))
+    except:
+        # If initialization file is missing, don't build usual UI
+        cw_remote_ini = None
+else:
     cw_remote_ini = None
-
 
 def bound ( low, high, value ):
     return max(low, min(high, value))
@@ -345,8 +379,10 @@ class CW_Remote ( App ):
                 Label(text="CW_Remote requires an initialization file 'CW_Remote.ini' to function, see example below:", size_hint=(1, 0.03))
 
             cw_remote_initialization_example_textinput = \
-                TextInput(text=cw_remote_initialization_example.strip(),
+                TextInput(text=cw_remote_initialization_example.rstrip(),
                           multiline=True, readonly=True, allow_copy=True, size_hint=(1, 0.97))
+            # cw_remote_initialization_example_textinput.background_disabled_normal = \
+            #     cw_remote_initialization_example_textinput.background_active
 
             self.CloudWatch_Remote.add_widget(cw_remote_initialization_example_label)
             self.CloudWatch_Remote.add_widget(cw_remote_initialization_example_textinput)
