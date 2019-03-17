@@ -20,21 +20,24 @@ I have installed the current "official" download shown here https://kivy.org/#do
 Some of the installation instructions here https://kivy.org/doc/stable/installation/installation.html didn't work as then written. But if you can do the usual install, the drag/drop of the dmg Kivy icon to the application fold icon, then you will be fine.
 
 For PyCharm setup, which is not covered by the dmg, use PyCharm's "Terminal" tab to:
+```
 $ pip install kivy
+```
 
 And because my app is designed to interact with Amazon Web Services api, you may have other dependencies:
-
+```
 $ pip install urllib3
-
 $ pip install botocore
-
 $ pip install boto3
+```
 
 ## This is absolutely crucial if painlessness is important to you: ##
 ### First, get your app working in PyCharm where debugging is relatively painless. ###
 
 From this very repository, download and unzip Kivy-OSX-Build_Kit.zip, 
+```
 $ cd <Kivy-OSX-Build_Kit>
+```
 
 ### Read READ_ME_FIRST.txt, I mean really, read that first and follow the directions therein.
 You will build get an OSX app that has my icon, admittedly not great. You can Google instructions for making your own icon source files. The process is quite simple and monumentally boring, but they get the job done in maybe 30 minutes.
