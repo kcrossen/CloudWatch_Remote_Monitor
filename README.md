@@ -31,8 +31,7 @@ $ pip install botocore
 $ pip install boto3
 ```
 
-## This is absolutely crucial if painlessness is important to you: ##
-### First, get your app working in PyCharm where debugging is relatively painless. ###
+### Absolutely crucial if you prefer painless: get your app working in PyCharm where debugging is relatively painless. ###
 
 Second, from this very repository, download and unzip Kivy-OSX-Build_Kit.zip, 
 ```
