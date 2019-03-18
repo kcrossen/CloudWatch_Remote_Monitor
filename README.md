@@ -40,3 +40,20 @@ $ cd <Kivy-OSX-Build_Kit>
 
 ### Read READ_ME_FIRST.txt, I mean really first. Read that first and follow the directions. ###
 You will build get an OSX app that has my icon, admittedly not great. You can Google instructions for making your own icon source files. The process is quite simple and monumentally boring, but they get the job done in maybe 30 minutes.
+
+# Second method based on PyInstaller #
+For this method to work you will need to:
+```
+$ pip install pyinstaller
+```
+Also to make the launched app's icon yours rather than the Kivy replace all of the png files in <path to your python>/site-packages/kivy/data/logo with your own pngs.The Kivy-OSX-Build_Kit.zip contains an example set of pngs.
+  
+Next set up a directory say in ~/Documents/<your app name>
+```
+$ mkdir ~/Documents/<your app name>
+$ cd ~/Documents/<your app name>
+```
+Then copy <your app>.py into this directory as well as <Your App Icon>.icns, and run:
+```
+$ pyinstaller -F -w --exclude-module _tkinter --exclude-module Tkinter --exclude-module enchant --exclude-module twisted --osx-bundle-identifier com.techview.cwremote  -i <Your App Icon>.icns  <Your App Name>.py
+```
