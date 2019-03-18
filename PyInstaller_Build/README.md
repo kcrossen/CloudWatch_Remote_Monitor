@@ -21,3 +21,4 @@ Now run:
 ```
 $ pyinstaller -F -w --exclude-module _tkinter --exclude-module Tkinter --exclude-module enchant --exclude-module twisted --osx-bundle-identifier com.techview.cwremote  -i <your app icon>.icns  <your app script>.py
 ```
+Currently, GitHub is failing to upload "appicons.icns" so get it from the zipped kit.
