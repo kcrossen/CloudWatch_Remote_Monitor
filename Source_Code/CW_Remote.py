@@ -39,8 +39,6 @@ from io import BytesIO
 
 import datetime
 
-import boto3
-
 import json
 
 # import re
@@ -49,6 +47,10 @@ from collections import OrderedDict
 
 from functools import partial
 
+Testing_Bypass_Initialization = False # True # False # Should be False unless testing
+
+if (not Testing_Bypass_Initialization):
+    import boto3
 
 # Example of supporting imported non-library modules
 # import sys
@@ -115,7 +117,6 @@ Screen_Manager_App = True # True # False #
 Function_Based_Control_Bar = True # True # False #
 
 Defer_GetMetricWidgetImage = True # True # False #
-Testing_Bypass_Initialization = False # True # False #
 
 # Class-based encapsulation doesn't work w/ Screen Manager
 if (Screen_Manager_App and (not Testing_Bypass_Initialization)): Function_Based_Control_Bar = True
@@ -270,12 +271,13 @@ if (len(cw_remote_ini_json) > 0):
             ci_widget_image_list.append(None)
 
 
-        # Initialize connection to CloudWatch.
-        cloudwatch_client = \
-            boto3.client('cloudwatch',
-                         aws_access_key_id=cw_remote_ini.get("aws_access_id", ''),
-                         aws_secret_access_key=cw_remote_ini.get("aws_secret_key", ''),
-                         region_name=cw_remote_ini.get("region_name", ''))
+        if (not Testing_Bypass_Initialization):
+            # Initialize connection to CloudWatch.
+            cloudwatch_client = \
+                boto3.client('cloudwatch',
+                             aws_access_key_id=cw_remote_ini.get("aws_access_id", ''),
+                             aws_secret_access_key=cw_remote_ini.get("aws_secret_key", ''),
+                             region_name=cw_remote_ini.get("region_name", ''))
 
     except:
         # If initialization file is missing, don't build usual UI
@@ -437,20 +439,20 @@ class Slider_Extended ( Slider ):
 class Control_Bar ( BoxLayout ):
     # self.Period_Value = cw_remote_ini.get("initial_period_hours", 24)
     Period_Value_Steps = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24,  # 18
-                               26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48,  # 12
-                               50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72,  # 12
-                               74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96,  # 12
-                               100, 104, 108, 112, 116, 120,  # 6
-                               124, 128, 132, 136, 140, 144,  # 6
-                               148, 152, 156, 160, 164, 168]  # 6
+                          26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48,  # 12
+                          50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72,  # 12
+                          74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96,  # 12
+                          100, 104, 108, 112, 116, 120,  # 6
+                          124, 128, 132, 136, 140, 144,  # 6
+                          148, 152, 156, 160, 164, 168]  # 6
 
     Period_End_Value_Steps = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24,  # 19
-                                   26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48,  # 12
-                                   50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72,  # 12
-                                   74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96,  # 12
-                                   100, 104, 108, 112, 116, 120,  # 6
-                                   124, 128, 132, 136, 140, 144,  # 6
-                                   148, 152, 156, 160, 164, 168]  # 6
+                              26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48,  # 12
+                              50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72,  # 12
+                              74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96,  # 12
+                              100, 104, 108, 112, 116, 120,  # 6
+                              124, 128, 132, 136, 140, 144,  # 6
+                              148, 152, 156, 160, 164, 168]  # 6
 
     def __init__(self, **kwargs):
         self._period_value = 24
@@ -956,7 +958,7 @@ class CW_Remote ( App ):
 
     def on_start(self, **kwargs):
         # print ("APP LOADED")
-        if (Defer_GetMetricWidgetImage): Clock.schedule_once(self.update, 0.25)
+        if (Defer_GetMetricWidgetImage and (cw_remote_ini is not None)): Clock.schedule_once(self.update, 0.25)
 
 # Instantiate and run the kivy app
 if __name__ == '__main__':
