@@ -55,5 +55,5 @@ $ cd ~/Documents/<your app name>
 ```
 Then copy `<your app script>.py` into this directory as well as `<your app icon>.icns`, and run:
 ```
-$ pyinstaller -F -w --exclude-module _tkinter --exclude-module Tkinter --exclude-module enchant --exclude-module twisted --osx-bundle-identifier com.techview.cwremote  -i <your app icon>.icns  <your app script>.py
+$ pyinstaller -F -w --exclude-module _tkinter --exclude-module Tkinter --exclude-module enchant --exclude-module twisted --osx-bundle-identifier <your bundle identifier>  -i <your app icon>.icns  <your app script>.py
 ```
