@@ -29,6 +29,7 @@ And because my app is designed to interact with Amazon Web Services api, you may
 $ pip install urllib3
 $ pip install botocore
 $ pip install boto3
+$ pip install matplotlib
 ```
 
 ### Absolutely crucial if you prefer painless: get your app working in PyCharm where debugging is relatively painless. ###
