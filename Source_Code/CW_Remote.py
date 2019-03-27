@@ -32,6 +32,7 @@ from kivy.uix.textinput import TextInput
 
 from kivy.clock import Clock
 
+import os, sys
 from os.path import dirname, isfile, join, expanduser
 import platform
 
@@ -177,6 +178,8 @@ cw_remote_initialization_example = \
     ]
 }
 """
+Initialization_Example_Label_text = \
+    "CW_Remote requires an initialization file 'CW_Remote.ini' to function, see example below:"
 
 cw_remote_duplex_layout = True
 Force_Duplex_Layout = True
@@ -202,7 +205,7 @@ Force_Refresh_Interval_Seconds = -1
 
 cw_remote_ini_json = ""
 cw_remote_ini = None
-script_directory = dirname(__file__)
+execution_directory = os.path.abspath(os.path.dirname(sys.argv[0]))
 os_platform = platform.system()
 
 # import simplejson
@@ -294,9 +297,28 @@ def Return_NYC_Wall_Time_String ( UTC_Datetime=None, NYC_Wall_Datetime=None, Tim
 
 
 if (os_platform == "Darwin"):
+    execution_directory = execution_directory.split("CW_Remote.app")[0]
+
+    def resource_path ( relative_path ):
+        """ Get absolute path to resource, works for dev and for PyInstaller """
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = execution_directory
+
+        return os.path.join(base_path, relative_path)
+
+    path_to_icon_image = resource_path(os.path.join("data", "cwremote-icon-512.png"))
+
+    Config.set('kivy','window_icon', path_to_icon_image)
+    Config.write()
+
+    # Initialization_Example_Label_text = path_to_icon_image + ": isfile == " + str(isfile(path_to_icon_image))
+
     try:
-        if (isfile(join(script_directory, "CW_Remote.ini"))):
-            ini_directory = script_directory
+        if (isfile(join(execution_directory, "CW_Remote.ini"))):
+            ini_directory = execution_directory
         else:
             home_dir = expanduser("~")
             ini_dir = "Documents/CW_Remote"
@@ -317,11 +339,14 @@ elif (os_platform == "Linux"):
         # "Running setup.py install for pycairo: finished with status 'error' "
         # ...
         # "No package 'cairo' found"
-        Force_GetMetricWidgetImage = True
+        # Fix:
+        # import matplotlib
+        # matplotlib.use('AGG')
+
         try:
             # To run from Pydroid 3
-            if (isfile(join(script_directory, "CW_Remote.ini"))):
-                ini_directory = script_directory
+            if (isfile(join(execution_directory, "CW_Remote.ini"))):
+                ini_directory = execution_directory
             else:
                 home_dir = expanduser("~")
                 ini_dir = "Documents/CW_Remote"
@@ -362,6 +387,9 @@ if (len(cw_remote_ini_json) > 0):
         if (cw_remote_layout == "paged"): cw_remote_duplex_layout = False
         elif (cw_remote_layout == "duplex"): cw_remote_duplex_layout = True
 
+        cw_api = cw_remote_ini.get("cw_api", "image") # "image" or "statistics"
+        if (cw_api == "image"): Force_GetMetricWidgetImage = True
+
         if ("refresh_interval_seconds" in cw_remote_ini):
             cw_remote_refresh_interval_seconds = cw_remote_ini["refresh_interval_seconds"]
         if (Force_Refresh_Interval_Seconds >= 0):
@@ -397,8 +425,10 @@ if (len(cw_remote_ini_json) > 0):
                 widget_descr["height"] = 2 * widget_descr["height"]
 
         fw_widget_figure_list = []
+        fw_plot_figure_list = []
         for idx in range(len(metric_descriptor_list)):
             fw_widget_figure_list.append(None)
+            fw_plot_figure_list.append(None)
 
         ci_widget_image_list = []
         for idx in range(len(widget_descriptor_list)):
@@ -423,6 +453,9 @@ def bound ( low, high, value ):
     return max(low, min(high, value))
 
 if (not Force_GetMetricWidgetImage):
+    import matplotlib
+    matplotlib.use('AGG')
+
     from matplotlib_backend_kivyagg import FigureCanvasKivyAgg as FigureCanvas
     import matplotlib.pyplot as plotter
     from matplotlib.dates import MinuteLocator, HourLocator, DayLocator, DateFormatter
@@ -483,13 +516,19 @@ if (not Force_GetMetricWidgetImage):
     every_three_hours = tuple([(3 * hour) for hour in range(24//3)])
     every_four_hours = tuple([(4 * hour) for hour in range(24//4)])
     every_six_hours = tuple([(6 * hour) for hour in range(24//6)])
+    every_twelve_hours = tuple([(12 * hour) for hour in range(24//12)])
 
-    every_five_minutes = tuple([(5 * minute) for minute in range(60//5)])
-    every_ten_minutes = tuple([(10 * minute) for minute in range(60//10)])
-    every_fifteen_minutes = tuple([(15 * minute) for minute in range(60//15)])
+    every_five_minutes_labeled = tuple([(5 * minute) for minute in range(60//5) if (minute > 0)])
+    every_ten_minutes_labeled = tuple([(10 * minute) for minute in range(60//10) if (minute > 0)])
+    every_fifteen_minutes_labeled = tuple([(15 * minute) for minute in range(60//15) if (minute > 0)])
+    every_thirty_minutes_labeled = tuple([(30 * minute) for minute in range(60//30) if (minute > 0)])
+    every_thirty_minutes = tuple([(30 * minute) for minute in range(60//30)])
 
     def Prepare_Get_Metric_Statistics_Figure ( Mertric_Statistics_List,
-                                               Period_Value, Graph_Width, Graph_Height ):
+                                               Period_Value, Graph_Width, Graph_Height,
+                                               Close_Existing_Plot_Figure ):
+
+        if (Close_Existing_Plot_Figure is not None): plotter.close(Close_Existing_Plot_Figure)
 
         line_width = 0.75
 
@@ -558,24 +597,33 @@ if (not Force_GetMetricWidgetImage):
                                        fontsize="large", color=label_color)
 
         # Attempt optimum x axis (date/time) tic labeling, complicated, heuristic
-        major_formatter = "hour"
+        major_minor_formatter = "hour"
 
         # Adaptive time axis tics and tic labels
-        if ((Period_Value >= 1) and (Period_Value < 6)):
+        if ((Period_Value >= 1) and (Period_Value < 3)):
             axes.xaxis.set_major_locator(HourLocator(every_hour))
-            axes.xaxis.set_minor_locator(MinuteLocator(every_five_minutes))
-        elif ((Period_Value >= 6) and (Period_Value < 12)):
+            axes.xaxis.set_minor_locator(MinuteLocator(every_five_minutes_labeled))
+            major_minor_formatter = "hour/minute"
+        elif ((Period_Value >= 3) and (Period_Value < 6)):
             axes.xaxis.set_major_locator(HourLocator(every_hour))
-            axes.xaxis.set_minor_locator(MinuteLocator(every_ten_minutes))
-        elif ((Period_Value >= 12) and (Period_Value < 18)):
+            axes.xaxis.set_minor_locator(MinuteLocator(every_ten_minutes_labeled))
+            major_minor_formatter = "hour/minute"
+        elif ((Period_Value >= 6) and (Period_Value < 8)):
             axes.xaxis.set_major_locator(HourLocator(every_hour))
-            axes.xaxis.set_minor_locator(MinuteLocator(every_fifteen_minutes))
-        elif ((Period_Value >= 18) and (Period_Value < 24)):
+            axes.xaxis.set_minor_locator(MinuteLocator(every_fifteen_minutes_labeled))
+            major_minor_formatter = "hour/minute"
+        elif ((Period_Value >= 8) and (Period_Value < 16)):
             axes.xaxis.set_major_locator(HourLocator(every_hour))
-            axes.xaxis.set_minor_locator(MinuteLocator((0, 30)))
+            axes.xaxis.set_minor_locator(MinuteLocator(every_thirty_minutes_labeled))
+            major_minor_formatter = "hour/minute"
+        elif ((Period_Value >= 16) and (Period_Value < 24)):
+            axes.xaxis.set_major_locator(HourLocator(every_hour))
+            axes.xaxis.set_minor_locator(MinuteLocator(every_thirty_minutes))
+
         elif ((Period_Value >= 24) and (Period_Value < (24 + 12))):
             axes.xaxis.set_major_locator(HourLocator(every_two_hours))
             axes.xaxis.set_minor_locator(HourLocator(every_hour))
+
         elif ((Period_Value >= (24 + 12)) and (Period_Value < (48 + 12))):
             axes.xaxis.set_major_locator(HourLocator(every_three_hours))
             axes.xaxis.set_minor_locator(HourLocator(every_hour))
@@ -589,25 +637,27 @@ if (not Force_GetMetricWidgetImage):
             axes.xaxis.set_minor_locator(HourLocator(every_three_hours))
 
         elif ((Period_Value >= (96 + 12)) and (Period_Value < (120 + 12))):
-            axes.xaxis.set_major_locator(HourLocator((0, 12)))
+            axes.xaxis.set_major_locator(HourLocator(every_twelve_hours))
             axes.xaxis.set_minor_locator(HourLocator(every_six_hours))
 
         elif ((Period_Value >= (120 + 12)) and (Period_Value < (144 + 12))):
             axes.xaxis.set_major_locator(DayLocator(every_day))
             axes.xaxis.set_minor_locator(HourLocator(every_four_hours))
-            major_formatter = "day"
+            major_minor_formatter = "day"
 
         elif ((Period_Value >= (144 + 12)) and (Period_Value < (168 + 12))):
             axes.xaxis.set_major_locator(DayLocator(every_day))
             axes.xaxis.set_minor_locator(HourLocator(every_six_hours))
-            major_formatter = "day"
+            major_minor_formatter = "day"
 
-        if (major_formatter == "hour"):
+        if (major_minor_formatter == "hour/minute"):
             axes.xaxis.set_major_formatter(DateFormatter("%H:00\n%m/%d"))
-        elif (major_formatter == "day"):
+            axes.xaxis.set_minor_formatter(DateFormatter("%M"))
+        elif (major_minor_formatter == "hour"):
+                axes.xaxis.set_major_formatter(DateFormatter("%H:00\n%m/%d"))
+        elif (major_minor_formatter == "day"):
             axes.xaxis.set_major_formatter(DateFormatter("%H:00\n%m/%d"))
 
-        # axes.xaxis.set_minor_formatter(DateFormatter("%M"))
         plotter.setp(axes.get_xticklabels(), rotation=0, ha="center")
 
         # cpu_time is sorted, so this can work
@@ -620,7 +670,7 @@ if (not Force_GetMetricWidgetImage):
         canvas = FigureCanvas(plot_figure)
         canvas.draw()
 
-        return canvas
+        return (canvas, plot_figure)
 
 
 Builder.load_string(
@@ -1046,7 +1096,7 @@ class CW_Remote ( App ):
             self.CloudWatch_Remote = BoxLayout(orientation='vertical')
 
             cw_remote_initialization_example_label = \
-                Label(text="CW_Remote requires an initialization file 'CW_Remote.ini' to function, see example below:", size_hint=(1, 0.03))
+                Label(text=Initialization_Example_Label_text, size_hint=(1, 0.03))
 
             cw_remote_initialization_example_textinput = \
                 TextInput(text=cw_remote_initialization_example.rstrip(),
@@ -1109,7 +1159,9 @@ class CW_Remote ( App ):
 
     # Fetch the AWS/CW Dashboard widget images
     def get_cloudwatch_graph ( self, Graph_Index ):
-        global widget_descriptor_list, fw_widget_figure_list, ci_widget_image_list
+        global widget_descriptor_list
+        global fw_widget_figure_list, fw_plot_figure_list
+        global ci_widget_image_list
 
         # print ("graph:", Graph_Index)
 
@@ -1141,7 +1193,7 @@ class CW_Remote ( App ):
                 # Test code that avoids the aws/cw metrics request/response latency ...
                 import io
                 import time
-                data = io.BytesIO(open(join(script_directory, "kivy-icon-512.png"), "rb").read())
+                data = io.BytesIO(open(join(execution_directory, "kivy-icon-512.png"), "rb").read())
                 # ... but allows arbitrary latency to be simulated
                 time.sleep(Testing_Bypass_Initialization_Delay_Seconds)
             # Park the coreimage widget for deferred inclusion in UI
@@ -1162,9 +1214,13 @@ class CW_Remote ( App ):
 
             metric_statistics_list = \
                 Get_Metric_Statistics_Datapoints(Graph_Index, period_end_utc, period_hours_duration)
-            metric_figure_widget = \
+            close_this_plot_figure = fw_plot_figure_list[Graph_Index]
+            metric_figure_widget, plot_figure = \
                 Prepare_Get_Metric_Statistics_Figure(metric_statistics_list,
-                                                     period_hours_duration, graph_width, graph_height)
+                                                     period_hours_duration, graph_width, graph_height,
+                                                     close_this_plot_figure)
+
+            fw_plot_figure_list[Graph_Index] = plot_figure
             # Park the figure widget for deferred inclusion in UI
             fw_widget_figure_list[Graph_Index] = metric_figure_widget
 
@@ -1244,14 +1300,18 @@ class CW_Remote ( App ):
         self.update()
 
     def on_next ( self, *args ):
+        if (self.Image_Widget): descriptor_list_length = len(widget_descriptor_list)
+        else: descriptor_list_length = len(metric_descriptor_list)
+
         if (self.Visible_Graph_Count == 2):
-            if ((self.Graph_Offset + 2) < len(widget_descriptor_list)):
+            # We are displaying two graphs, must account for second graph after skipping ahead
+            if ((self.Graph_Offset + 2 + 1) < descriptor_list_length):
                 self.Graph_Offset += 2
-            elif ((self.Graph_Offset + 1) < len(widget_descriptor_list)):
+            elif ((self.Graph_Offset + 1 + 1) < descriptor_list_length):
                 # If at at the end save one graph, move ahead by one for odd alignment
                 self.Graph_Offset += 1
         else:
-            if ((self.Graph_Offset + 1) < len(widget_descriptor_list)):
+            if ((self.Graph_Offset + 1) < descriptor_list_length):
                 self.Graph_Offset += 1
         self.update()
 
