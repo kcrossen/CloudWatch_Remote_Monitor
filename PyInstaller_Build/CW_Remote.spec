@@ -4,9 +4,9 @@ block_cipher = None
 
 
 a = Analysis(['CW_Remote.py'],
-             pathex=['/Users/Ken/Documents/CW_Remote_PyInstaller'],
+             pathex=['/Users/Ken/Documents/Kivy_Projects/CW_Remote_PyInstaller'],
              binaries=[],
-             datas=[],
+             datas=[('data/*.*', 'data')],
              hiddenimports=[],
              hookspath=[],
              runtime_hooks=[],
