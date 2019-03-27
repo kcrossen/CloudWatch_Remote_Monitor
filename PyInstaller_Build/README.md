@@ -5,6 +5,7 @@ Read me first!!!
 To get a more professional-looking you will need, at minimum, to create an application icns file and a 512x512 png file from your icns creation process. Directions for this process can be found by Googling "how to create custom mac icns" (without the quotes).
 
 $ mkdir `<build dir>`
+
 $ cd `<build dir>`
 
 In your PyInstaller build directory `<build dir>,` put copies of your Python script `<your script>.py` (the one containing "if __name__ == '__main__': etc.") and any Python modules you have authored.
