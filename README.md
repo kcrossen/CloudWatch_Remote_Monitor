@@ -34,27 +34,8 @@ $ pip install matplotlib
 
 ### Absolutely crucial if you prefer painless: get your app working in PyCharm where debugging is relatively painless. ###
 
-Next, from this very repository, download and unzip Kivy-OSX-Build_Kit.zip, 
-```
-$ cd <Kivy-OSX-Build_Kit>
-```
+Next, from this very repository, download and unzip:
+https://github.com/kcrossen/CloudWatch_Remote_Monitor/blob/master/CW_Remote_PyInstaller_Kit.zip
 
-### Read READ_ME_FIRST.txt, I mean really first. Read that first and follow the directions. ###
-You will build get an OSX app that has my icon, admittedly not great. You can Google instructions for making your own icon source files. The process is quite simple and monumentally boring, but they get the job done in maybe 30 minutes.
-
-# Second method based on PyInstaller #
-For this method to work you will need to:
-```
-$ pip install pyinstaller
-```
-Also to make the launched app's icon yours rather than the Kivy icon, replace all of the png files in `<path to your python>/site-packages/kivy/data/logo` with your own pngs.The Kivy-OSX-Build_Kit.zip contains an example set of pngs.
-  
-Next set up a directory:
-```
-$ mkdir ~/Documents/<your app name>
-$ cd ~/Documents/<your app name>
-```
-Then copy `<your app script>.py` into this directory as well as `<your app icon>.icns`, and run:
-```
-$ pyinstaller -F -w --exclude-module _tkinter --exclude-module Tkinter --exclude-module enchant --exclude-module twisted --osx-bundle-identifier <your bundle identifier>  -i <your app icon>.icns  <your app script>.py
-```
+Read instructions here:
+https://github.com/kcrossen/CloudWatch_Remote_Monitor/blob/master/PyInstaller_Build/README.md
