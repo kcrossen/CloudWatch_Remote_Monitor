@@ -4,8 +4,7 @@ Read me first!!!
 
 To get a more professional-looking you will need, at minimum, to create an application icns file and a 512x512 png file from your icns creation process. Directions for this process can be found by Googling "how to create custom mac icns" (without the quotes).
 
-$ mkdir `<build dir>`
-
+$ mkdir `<build dir>`<br/>
 $ cd `<build dir>`
 
 In your PyInstaller build directory `<build dir>,` put copies of your Python script `<your script>.py` (the one containing "if __name__ == '__main__': etc.") and any Python modules you have authored.
@@ -45,13 +44,13 @@ if (os_platform == "Darwin"):
 ...
 ```
 
-You should have already done:
-$ pip install pyinstaller
-or at the very least recently done:
+You should have already done:<br/>
+$ pip install pyinstaller<br/>
+or at the very least recently done:<br/>
 $ pip install --upgrade pyinstaller
 
-After the setup detailed above:
-$ cd `<build dir>`
+After the setup detailed above:<br/>
+$ cd `<build dir>`<br/>
 $ pyinstaller -F -w --exclude-module _tkinter --exclude-module Tkinter --exclude-module enchant --exclude-module twisted --add-data 'data/*.*:data' --osx-bundle-identifier `<your bundle identifier>`  -i `<your icns>.icns`  `<your app>.py`
 
 PyInstaller will walk down your script/module/submodule structure finding all of the dependencies that are not "hidden". To make sure this works as intended, try executing `<build dir>/<your script>.py`. If it fails, PyInstaller will probably fail also.
