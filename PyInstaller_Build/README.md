@@ -2,7 +2,7 @@
 
 Read me first!!!
 
-To get a more professional-looking you will need, at minimum, to create an application icns file and a 512x512 png file from your icns creation process. Directions for this process can be found by Googling "how to create custom mac icns" (without the quotes).
+To get a more professional-looking app you will need, at minimum, to create an application icns file and a 512x512 png file from your icns creation process. Directions for this process can be found by Googling "how to create custom mac icns" (without the quotes).
 
 $ mkdir `<build dir>`<br/>
 $ cd `<build dir>`
