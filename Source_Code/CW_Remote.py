@@ -49,7 +49,7 @@ import platform
 
 from io import BytesIO
 
-import datetime, calendar
+import datetime, calendar, time
 
 from collections import OrderedDict
 
@@ -86,6 +86,9 @@ cw_remote_initialization_example = \
     "aws_access_id": "xxxxxxxxxxxxxxxxxxxx",
     "aws_secret_key": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "region_name": "xxxxxxxxx",
+    
+    "alarm_name_list": ["xxxxxx CPU Warning", "xxxxxx CPU Alarm",
+                        "xxxxxx WriteIOPS Warning", "xxxxxx WriteIOPS Alarm"],
 
     "metric_descriptor_list": [
         [
@@ -197,7 +200,7 @@ Initialization_Example_Label_text = \
 CW_Remote_Duplex_Layout = True
 Force_Duplex_Layout = True
 
-Force_GetMetricWidgetImage = False
+Force_GetMetricWidgetImage = False # True # False #
 
 Screen_Manager_App = True # True # False #
 
@@ -449,29 +452,29 @@ if (len(cw_remote_ini_json) > 0):
 
         if (Force_Duplex_Layout): CW_Remote_Duplex_Layout = True
 
-        metric_descriptor_list = []
+        Alarm_Name_List = cw_remote_ini.get("alarm_name_list", [])
+
+        Metric_Descriptor_List = []
         ini_metric_descriptor_list = cw_remote_ini.get("metric_descriptor_list", [])
         for metric_descr in ini_metric_descriptor_list:
             # metric_descr is itself a list, potentially with one element, or with two
             this_metric_descriptor = copy.deepcopy(metric_descr)
-            metric_descriptor_list.append(this_metric_descriptor)
+            Metric_Descriptor_List.append(this_metric_descriptor)
 
-        widget_descriptor_list = []
+        Widget_Image_Descriptor_List = []
         ini_widget_descriptor_list = cw_remote_ini.get("widget_descriptor_list", [])
         for widget_descr in ini_widget_descriptor_list:
             this_widget_descriptor = widget_descr.copy()
-            widget_descriptor_list.append(this_widget_descriptor)
+            Widget_Image_Descriptor_List.append(this_widget_descriptor)
 
-        if (len(widget_descriptor_list) < 2):
+        if (len(Widget_Image_Descriptor_List) < 2):
             CW_Remote_Duplex_Layout = False
 
         if (CW_Remote_Duplex_Layout):
-            # No way to page through these, reduce fetch effort/time
-            # widget_descriptor_list = widget_descriptor_list[:2]
             pass
         else:
             # Not duplex, make graphs "higher", i.e. more vertical resolution
-            for widget_descr in widget_descriptor_list:
+            for widget_descr in Widget_Image_Descriptor_List:
                 widget_descr["height"] = 2 * widget_descr["height"]
 
         # Initialize connection to CloudWatch.
@@ -489,6 +492,121 @@ else:
     cw_remote_ini = None
 
 
+from threading import Thread
+
+
+def Describe_Alarm_History ( Alarm_Name, Alarm_History_Results ):
+    datetime_now_utc = datetime.datetime.now(UTC_Time_Zone)
+    datetime_yesterday_utc = datetime_now_utc - datetime.timedelta(days=1)
+
+    alarm_history = \
+        cloudwatch_client.describe_alarm_history(AlarmName=Alarm_Name,
+                                                 HistoryItemType="StateUpdate", # 'StateUpdate' | 'Action',
+                                                 StartDate=datetime_yesterday_utc,
+                                                 EndDate=datetime_now_utc,
+                                                 MaxRecords=100,
+                                                 NextToken='')
+
+    Alarm_History_Results[Alarm_Name] = alarm_history
+
+def Alarm_History ( ):
+    if (len(Alarm_Name_List) == 0): return {}
+
+    alarm_history_threads = [ None ] * len(Alarm_Name_List)
+    alarm_history_results = { }
+
+    for alarm_index, alarm_name in enumerate(Alarm_Name_List):
+        alarm_history_threads[alarm_index] = \
+            Thread(target=Describe_Alarm_History, args=(alarm_name, alarm_history_results))
+        alarm_history_threads[alarm_index].start()
+
+    for alarm_index, in range(len(Alarm_Name_List)):
+        alarm_history_threads[alarm_index].join()
+
+    return alarm_history_results
+
+    # alarm_history_json = simplejson.dumps(alarm_history,
+    #                                       namedtuple_as_object=True, sort_keys=True,
+    #                                       default=json_serial,  # cls=DateTimeEncoder, #
+    #                                       indent=(2 * ' '))
+    # print (alarm_history_json)
+
+def Optimize_DataPoint_Summary_Seconds ( Period_Hours ):
+    datapoint_summary_seconds = 60
+
+    # The maximum number of data points returned from a single call is 1,440.
+    # The period for each datapoint can be 1, 5, 10, 30, 60, or any multiple of 60 seconds.
+
+    datapoint_count = (Period_Hours * 60 * 60) / datapoint_summary_seconds
+    while (datapoint_count > 1440):
+        datapoint_summary_seconds += 60
+        datapoint_count = (Period_Hours * 60 * 60) / datapoint_summary_seconds
+
+    return datapoint_summary_seconds
+
+
+def Get_Metric_Statistics ( Metric_Descriptor, Metric_Statistics_List, Metric_Statistics_Index ):
+    these_metric_statistics = \
+        cloudwatch_client.get_metric_statistics(MetricName=Metric_Descriptor["MetricName"],
+                                                Namespace=Metric_Descriptor["Namespace"],
+                                                Dimensions=Metric_Descriptor["Dimensions"],
+                                                StartTime=Metric_Descriptor["StartTime"],
+                                                EndTime=Metric_Descriptor["EndTime"],
+                                                Period=Metric_Descriptor["Period"],
+                                                Statistics=Metric_Descriptor["Statistics"],
+                                                Unit=Metric_Descriptor["Unit"])
+    these_metric_statistics["MetricDescriptor"] = Metric_Descriptor
+
+    Metric_Statistics_List[Metric_Statistics_Index] = these_metric_statistics
+
+Cache_Page_Metrics = True # False # True #
+Cache_Page_Metric_Statistics = []
+
+def Page_Get_Metric_Statistics_Datapoints ( Metric_Index_List, Period_End_UTC, Period_Hours ):
+    global Cache_Page_Metric_Statistics
+
+    if (len(Metric_Index_List) == 0): return False
+
+    Cache_Page_Metric_Statistics = []
+
+    if (not Cache_Page_Metrics): return False
+
+    # start_time = time.clock()
+
+    period_begin_utc = Period_End_UTC - datetime.timedelta(hours=Period_Hours)
+    datapoint_summary_seconds = Optimize_DataPoint_Summary_Seconds(Period_Hours)
+
+    page_metric_descriptor_list = {}
+
+    for list_index, metric_index in enumerate(Metric_Index_List):
+        metric_descr_list = Metric_Descriptor_List[metric_index]
+        metric_statistics_list = [None] * len(metric_descr_list)
+        for descr_index, metric_descr in enumerate(metric_descr_list):
+            page_metric_descriptor_list[(list_index, descr_index)] = metric_descr
+        # Graph placeholder metric_statistics_list contain a placeholder ...
+        # ... for each line on the graph, each line representing one metric statistics.
+        Cache_Page_Metric_Statistics.append(metric_statistics_list)
+        # For each graph on this page (either one or two) ...
+        # ... there must be one graph placeholder in the cache.
+
+    get_metric_statistics_threads = []
+
+    for list_descr_key, metric_descr in page_metric_descriptor_list.items():
+        list_index, descr_index = list_descr_key
+        metric_descr["StartTime"] = period_begin_utc
+        metric_descr["EndTime"] = Period_End_UTC
+        metric_descr["Period"] = datapoint_summary_seconds
+        this_thread = Thread(target=Get_Metric_Statistics,
+                             args=(metric_descr, Cache_Page_Metric_Statistics[list_index], descr_index))
+        # print ("start (", len(get_metric_statistics_threads), "):", (time.clock() - start_time), sep='')
+        this_thread.start()
+        get_metric_statistics_threads.append(this_thread)
+
+    for thread_index, this_thread in enumerate(get_metric_statistics_threads):
+        this_thread.join()
+        # print("end (", thread_index, "):", (time.clock() - start_time), sep='')
+
+
 # Functions to plot data graphs with matplotlib ...
 # ... the alternative is server-plotted graphs returned as png byte streams
 if (not Force_GetMetricWidgetImage):
@@ -501,36 +619,36 @@ if (not Force_GetMetricWidgetImage):
 
     graph_plot_figure_list = [None, None]
 
-    def Get_Metric_Statistics_Datapoints ( Metric_Index, Perion_End_UTC, Period_Hours ):
-        period_begin_utc = Perion_End_UTC - datetime.timedelta(hours=Period_Hours)
+    def Graph_Get_Metric_Statistics_Datapoints ( Metric_Index, Period_End_UTC, Period_Hours ):
+        period_begin_utc = Period_End_UTC - datetime.timedelta(hours=Period_Hours)
 
-        datapoint_summary_seconds = 60
+        # datapoint_summary_seconds = 60
+        #
+        # # The maximum number of data points returned from a single call is 1,440.
+        # # The period for each datapoint can be 1, 5, 10, 30, 60, or any multiple of 60 seconds.
+        #
+        # datapoint_count = (Period_Hours * 60 * 60) / datapoint_summary_seconds
+        # while (datapoint_count > 1440):
+        #     datapoint_summary_seconds += 60
+        #     datapoint_count = (Period_Hours * 60 * 60) / datapoint_summary_seconds
 
-        # The maximum number of data points returned from a single call is 1,440.
-        # The period for each datapoint can be 1, 5, 10, 30, 60, or any multiple of 60 seconds.
+        datapoint_summary_seconds = Optimize_DataPoint_Summary_Seconds(Period_Hours)
 
-        datapoint_count = (Period_Hours * 60 * 60) / datapoint_summary_seconds
-        while (datapoint_count > 1440):
-            datapoint_summary_seconds += 60
-            datapoint_count = (Period_Hours * 60 * 60) / datapoint_summary_seconds
+        metric_descr_list = Metric_Descriptor_List[Metric_Index]
 
-        metric_statistics_list = []
+        get_metric_statistics_threads = [ None ] * len(metric_descr_list)
+        metric_statistics_list = [ None ] * len(metric_descr_list)
 
-        metric_descr_list = metric_descriptor_list[Metric_Index]
+        for descr_index, metric_descr in enumerate(metric_descr_list):
+            metric_descr["StartTime"] = period_begin_utc
+            metric_descr["EndTime"] = Period_End_UTC
+            metric_descr["Period"] = datapoint_summary_seconds
+            get_metric_statistics_threads[descr_index] = \
+                Thread(target=Get_Metric_Statistics, args=(metric_descr, metric_statistics_list, descr_index))
+            get_metric_statistics_threads[descr_index].start()
 
-        for metric_descr in metric_descr_list:
-            these_metric_statistics = \
-                cloudwatch_client.get_metric_statistics(MetricName=metric_descr["MetricName"],
-                                                        Namespace=metric_descr["Namespace"],
-                                                        Dimensions=metric_descr["Dimensions"],
-                                                        StartTime=period_begin_utc,
-                                                        EndTime=Perion_End_UTC,
-                                                        Period=datapoint_summary_seconds,
-                                                        Statistics=metric_descr["Statistics"],
-                                                        Unit=metric_descr["Unit"])
-            these_metric_statistics["MetricDescriptor"] = metric_descr
-
-            metric_statistics_list.append(these_metric_statistics)
+        for descr_index in range(len(metric_descr_list)):
+            get_metric_statistics_threads[descr_index].join()
 
         return metric_statistics_list
 
@@ -565,11 +683,11 @@ if (not Force_GetMetricWidgetImage):
     every_thirty_minutes_labeled = tuple([(30 * minute) for minute in range(60//30) if (minute > 0)])
     every_thirty_minutes = tuple([(30 * minute) for minute in range(60//30)])
 
-    def Prepare_Get_Metric_Statistics_Figure ( Plot_Figure_Index,
-                                               Mertric_Statistics_List,
-                                               Graph_Width, Graph_Height,
-                                               Time_Axis_Limit_Offset_Ratios=(0, 1),
-                                               Value_Axis_Limit_Offset_Ratios=(0, 1) ):
+    def Metric_Statistics_Graph_Figure ( Plot_Figure_Index,
+                                         Mertric_Statistics_List,
+                                         Graph_Width, Graph_Height,
+                                         Time_Axis_Limit_Offset_Ratios=(0, 1),
+                                         Value_Axis_Limit_Offset_Ratios=(0, 1) ):
 
         global graph_plot_figure_list
 
@@ -582,9 +700,9 @@ if (not Force_GetMetricWidgetImage):
         line_width = 0.75
 
         # Trim off real estate wasting margins
-        left_trim_ratio = 0.06
+        left_trim_ratio = 0.065
         bottom_trim_ratio = 0.13
-        right_trim_ratio = 0.94
+        right_trim_ratio = 0.935
         top_trim_ratio = 0.98
 
         axes = plot_figure.gca()
@@ -660,7 +778,7 @@ if (not Force_GetMetricWidgetImage):
 
             if (len(left_y_axis_labels) > 1):
                 label_text, label_color = left_y_axis_labels[1]
-                plotter.gcf().text(0.02, 0.55, label_text,
+                plotter.gcf().text(0.015, 0.55, label_text,
                                        rotation="vertical", verticalalignment="center",
                                        fontsize="large", color=label_color)
         # ... right y axis labels
@@ -671,7 +789,7 @@ if (not Force_GetMetricWidgetImage):
 
             if (len(right_y_axis_labels) > 1):
                 label_text, label_color = right_y_axis_labels[1]
-                plotter.gcf().text(0.98, 0.55, label_text,
+                plotter.gcf().text(0.985, 0.55, label_text,
                                        rotation="vertical", verticalalignment="center",
                                        fontsize="large", color=label_color)
 
@@ -1098,7 +1216,7 @@ class GridLayoutExtended ( GridLayout ):
         super(GridLayoutExtended, self).__init__(**kwargs)
 
         with self.canvas.before:
-            Color(1, 0, 0, 1)
+            Color(0.75, 0.95, 1, 1)
             self.rect = Rectangle(size=self.size, pos=self.pos)
 
         self.bind(size=self._update_rect, pos=self._update_rect)
@@ -1110,19 +1228,26 @@ class GridLayoutExtended ( GridLayout ):
 
 def Build_Help_GridLayout ( on_help_escape_callback ):
     cloudwatch_remote_help = \
-        GridLayoutExtended(cols=1, padding=[2, 2, 0, 2], spacing=0,
+        GridLayoutExtended(cols=1, padding=[(13 + 2), 4, 0, 4], spacing=0,
                            size_hint=(None, None), width=Initialize_Window_Width)
+
+    # help_escape_button_a = Button(text="Scroll down for explanation, or click here to return to graphs", bold=True,
+    #                               background_color=[1, 0, 0, 1],
+    #                               size=((Initialize_Window_Width - 4), 28), size_hint=(None, None))
+    # help_escape_button_a.bind(on_press=on_help_escape_callback)
+    # cloudwatch_remote_help.add_widget(help_escape_button_a)
 
     cwremote_screen_image = \
         Image(source=path_to_cwremote_screen_image,
-              size=((Initialize_Window_Width - 4), 815), size_hint=(None, None))
+              size=(1250, 240), size_hint=(None, None))
     cloudwatch_remote_help.add_widget(cwremote_screen_image)
+    # cwremote_screen_image.center_x = (cwremote_screen_image.width / 2) + 10
 
-    help_escape_button = Button(text="Return to graphs", bold=True,
-                                background_color=[1, 0, 0, 1],
-                                size=((Initialize_Window_Width - 4), 28), size_hint=(None, None))
-    help_escape_button.bind(on_press=on_help_escape_callback)
-    cloudwatch_remote_help.add_widget(help_escape_button)
+    help_escape_button_b = Button(text="Click here to return to graphs", bold=True,
+                                  background_color=[1, 0, 0, 1],
+                                  size=(1250, 28), size_hint=(None, None))
+    help_escape_button_b.bind(on_press=on_help_escape_callback)
+    cloudwatch_remote_help.add_widget(help_escape_button_b)
 
     CW_Remote_Help_Text_Paragraphs = [
         "The red '[b][color=ff0000]A[/color][/b]' marks the slider that adjusts the duration of the period for which the graphed data will appear. " +
@@ -1133,15 +1258,23 @@ def Build_Help_GridLayout ( on_help_escape_callback ):
         "The red '[b][color=ff0000]B[/color][/b]' marks the slider that adjusts the hours before now that the graphed period ends. " +
         "It can adjust from 0 hours to 7 days (168 hours). " +
         "The label to the right of the this slider displays the days and hours before now that the graphed period ends. " +
-        "This slider is logarithmic, it is increasingly sensitive toward the right end of the scale. "
+        "This slider is logarithmic, it is increasingly sensitive toward the right end of the scale. ",
+
+        "Simplex mode displays one graph per 'page'. Duplex mode displays two graphs per 'page'. " +
+        "'Page' through the various graph 'pages' using 'previous' and 'next'. ",
+
+        "For more detail in a particular area of the graph, " +
+        "draw a box on the graph surrounding that area and the display will zoom in on the boxed area. " +
+        "To escape back to the original graph, use the 'esc' key. " +
+        "The 'Refresh' button will load more current metrics from the original data source at the original zoom. "
     ]
 
     # Add help text paragraphs to grid.
     for help_text_paragraph in CW_Remote_Help_Text_Paragraphs:
-        help_txt_para = LabelExtended(text=help_text_paragraph, markup=True, text_size=(1272, None),
+        help_txt_para = LabelExtended(text=help_text_paragraph, markup=True, text_size=(1246, None),
                                       color=[0, 0, 0, 1], padding_x=2,
-                                      width=(Initialize_Window_Width - 4), size_hint=(None, None))
-        help_txt_para.height = math.ceil(len(help_text_paragraph) * (1.33 / 255)) * 25
+                                      width=1250, size_hint=(None, None))
+        help_txt_para.height = math.ceil(len(help_text_paragraph) * (1.33 / 255)) * 30
         cloudwatch_remote_help.add_widget(help_txt_para)
 
         cloudwatch_remote_help.bind(minimum_height=cloudwatch_remote_help.setter('height'))
@@ -1179,7 +1312,7 @@ class CW_Remote ( App ):
             self.Horizontal_Graph_Width = int(round(horizontal_size * 0.98))
             self.Vertical_Graph_Height = vertical_size * Vertical_Graph_Height_Factor
             # print ("h:", horizontal_size, "v:", vertical_size)
-            for widget_descriptor in widget_descriptor_list:
+            for widget_descriptor in Widget_Image_Descriptor_List:
                 widget_descriptor["width"] = self.Horizontal_Graph_Width
                 if (self.Visible_Graph_Count == 2):
                     widget_descriptor["height"] = int(round(self.Vertical_Graph_Height / 2.0))
@@ -1278,12 +1411,14 @@ class CW_Remote ( App ):
                 self.Simplex_TimeSpanControlBar.size_hint = (1, 0.04)
 
                 # Duplex duplex screen
-                self.Duplex_Upper_Graph_Box = BoxLayout(id="Duplex_Upper_Graph_Box", orientation='vertical', size_hint=(1, 0.48))
+                self.Duplex_Upper_Graph_Box = BoxLayout(id="Duplex_Upper_Graph_Box",
+                                                        orientation='vertical', size_hint=(1, 0.48))
                 self.Duplex_Upper_Graph_Box.bind(on_touch_down=self.on_touch_down)
                 self.Duplex_Upper_Graph_Box.bind(on_touch_move=self.on_touch_move)
                 self.Duplex_Upper_Graph_Box.bind(on_touch_up=self.on_touch_up)
 
-                self.Duplex_Lower_Graph_Box = BoxLayout(id="Duplex_Lower_Graph_Box", orientation='vertical', size_hint=(1, 0.48))
+                self.Duplex_Lower_Graph_Box = BoxLayout(id="Duplex_Lower_Graph_Box",
+                                                        orientation='vertical', size_hint=(1, 0.48))
                 self.Duplex_Lower_Graph_Box.bind(on_touch_down=self.on_touch_down)
                 self.Duplex_Lower_Graph_Box.bind(on_touch_move=self.on_touch_move)
                 self.Duplex_Lower_Graph_Box.bind(on_touch_up=self.on_touch_up)
@@ -1299,7 +1434,8 @@ class CW_Remote ( App ):
                 self.CloudWatch_Remote.add_widget(self.CloudWatch_Remote_Duplex_Screen)
 
                 # Simplex screen
-                self.Simplex_Lower_Graph_Box = BoxLayout(id="Simplex_Lower_Graph_Box", orientation='vertical', size_hint=(1, (2 * 0.48)))
+                self.Simplex_Lower_Graph_Box = BoxLayout(id="Simplex_Lower_Graph_Box",
+                                                         orientation='vertical', size_hint=(1, (2 * 0.48)))
                 self.Simplex_Lower_Graph_Box.bind(on_touch_down=self.on_touch_down)
                 self.Simplex_Lower_Graph_Box.bind(on_touch_move=self.on_touch_move)
                 self.Simplex_Lower_Graph_Box.bind(on_touch_up=self.on_touch_up)
@@ -1375,10 +1511,17 @@ class CW_Remote ( App ):
 
         self.title = "CW_Remote" + " (" + Period_Span_NYC_Wall_Time(self.Period_Duration_Hours,
                                                                      self.Period_End_Hours_Ago) + ")"
+        datetime_now_utc = datetime.datetime.now(UTC_Time_Zone)
+        period_end_utc = datetime_now_utc - datetime.timedelta(hours=self.Period_End_Hours_Ago)
+
         if (cw_remote_ini is not None):
             if (self.Visible_Graph_Count == 2):
                 self.Duplex_Upper_Graph_Box.clear_widgets()
                 self.Duplex_Lower_Graph_Box.clear_widgets()
+
+                if ((not self.Image_Widget) and Cache_Page_Metrics):
+                    Page_Get_Metric_Statistics_Datapoints([(self.Graph_Offset + 0), (self.Graph_Offset + 1)],
+                                                          period_end_utc, self.Period_Duration_Hours)
 
                 self.get_cloudwatch_graph(self.Graph_Offset + 0)
                 self.get_cloudwatch_graph(self.Graph_Offset + 1)
@@ -1393,6 +1536,10 @@ class CW_Remote ( App ):
             elif (self.Visible_Graph_Count == 1):
                 self.Simplex_Lower_Graph_Box.clear_widgets()
 
+                if ((not self.Image_Widget) and Cache_Page_Metrics):
+                    Page_Get_Metric_Statistics_Datapoints([(self.Graph_Offset + 0)],
+                                                          period_end_utc, self.Period_Duration_Hours)
+
                 self.get_cloudwatch_graph(self.Graph_Offset + 0)
 
                 if (self.Image_Widget):
@@ -1405,7 +1552,7 @@ class CW_Remote ( App ):
 
     # Fetch the AWS/CW Dashboard widget images
     def get_cloudwatch_graph ( self, Graph_Index ):
-        global widget_descriptor_list
+        # global Widget_Image_Descriptor_List
         global graph_plot_metric_statistics_list
         global graph_widget_list
 
@@ -1419,7 +1566,7 @@ class CW_Remote ( App ):
             now_datetime_utc = datetime.datetime.now(UTC_Time_Zone)
             time_zone_offset_string = NYC_Wall_DateTime_Offset(now_datetime_utc)
 
-            widget_descriptor = widget_descriptor_list[Graph_Index]
+            widget_descriptor = Widget_Image_Descriptor_List[Graph_Index]
             widget_descriptor["start"] = "-PT" + str(abs(self.Period_Duration_Hours) +
                                                      abs(self.Period_End_Hours_Ago)) + "H"
             widget_descriptor["end"] = "-PT" + str(abs(self.Period_End_Hours_Ago)) + "H"
@@ -1459,16 +1606,19 @@ class CW_Remote ( App ):
             elif (self.Visible_Graph_Count == 1):
                 graph_height = int(round(self.Vertical_Graph_Height))
 
-            metric_statistics_list = \
-                Get_Metric_Statistics_Datapoints(Graph_Index, period_end_utc, self.Period_Duration_Hours)
+            if (Cache_Page_Metrics and (len(Cache_Page_Metric_Statistics) > 0)):
+                metric_statistics_list = Cache_Page_Metric_Statistics[graph_widget_list_index]
+            else:
+                metric_statistics_list = \
+                    Graph_Get_Metric_Statistics_Datapoints(Graph_Index, period_end_utc, self.Period_Duration_Hours)
 
             # Preserve for potential zoom
             graph_plot_metric_statistics_list[graph_widget_list_index] = metric_statistics_list
 
             metric_figure_widget = \
-                Prepare_Get_Metric_Statistics_Figure(graph_widget_list_index,
-                                                     metric_statistics_list,
-                                                     graph_width, graph_height)
+                Metric_Statistics_Graph_Figure(graph_widget_list_index,
+                                               metric_statistics_list,
+                                               graph_width, graph_height)
 
             # Park the figure widget for deferred inclusion in UI
             graph_widget_list[graph_widget_list_index] = metric_figure_widget
@@ -1495,11 +1645,11 @@ class CW_Remote ( App ):
         metric_statistics_list = graph_plot_metric_statistics_list[graph_widget_list_index]
 
         metric_figure_widget = \
-            Prepare_Get_Metric_Statistics_Figure(graph_widget_list_index,
-                                                 metric_statistics_list,
-                                                 graph_width, graph_height,
-                                                 Time_Axis_Limit_Offset_Ratios=Time_Axis_Zoom_Offset_Ratios,
-                                                 Value_Axis_Limit_Offset_Ratios=Value_AxisZoom_Offset_Ratios)
+            Metric_Statistics_Graph_Figure(graph_widget_list_index,
+                                           metric_statistics_list,
+                                           graph_width, graph_height,
+                                           Time_Axis_Limit_Offset_Ratios=Time_Axis_Zoom_Offset_Ratios,
+                                           Value_Axis_Limit_Offset_Ratios=Value_AxisZoom_Offset_Ratios)
 
         # Park the figure widget for deferred inclusion in UI
         graph_widget_list[graph_widget_list_index] = metric_figure_widget
@@ -1629,13 +1779,21 @@ class CW_Remote ( App ):
         self.CloudWatch_Remote.canvas.ask_update()
         return True
 
+    def clear_touch ( self ):
+        self.Touch_Down_Instance_Id = None
+        self.Touch_Down_Index = None
+        self.Touch_Down_Ratio_Horizontal = None
+        self.Touch_Down_Ratio_Vertical = None
+        self.Touch_Down_X = None
+        self.Touch_Down_Y = None
+
 
     def adjust_graph_height ( self ):
         if (self.Visible_Graph_Count == 2):
-            for widget_descriptor in widget_descriptor_list:
+            for widget_descriptor in Widget_Image_Descriptor_List:
                 widget_descriptor["height"] = int(round(self.Vertical_Graph_Height / 2.0))
         elif (self.Visible_Graph_Count == 1):
-            for widget_descriptor in widget_descriptor_list:
+            for widget_descriptor in Widget_Image_Descriptor_List:
                 widget_descriptor["height"] = int(round(self.Vertical_Graph_Height))
 
     def on_simplex ( self, *args ):
@@ -1702,8 +1860,8 @@ class CW_Remote ( App ):
         return True
 
     def on_next ( self, *args ):
-        if (self.Image_Widget): descriptor_list_length = len(widget_descriptor_list)
-        else: descriptor_list_length = len(metric_descriptor_list)
+        if (self.Image_Widget): descriptor_list_length = len(Widget_Image_Descriptor_List)
+        else: descriptor_list_length = len(Metric_Descriptor_List)
 
         if (self.Visible_Graph_Count == 2):
             # We are displaying two graphs, must account for second graph after skipping ahead
@@ -1718,13 +1876,6 @@ class CW_Remote ( App ):
         self.force_update()
         return True
 
-    def clear_touch ( self ):
-        self.Touch_Down_Instance_Id = None
-        self.Touch_Down_Index = None
-        self.Touch_Down_Ratio_Horizontal = None
-        self.Touch_Down_Ratio_Vertical = None
-        self.Touch_Down_X = None
-        self.Touch_Down_Y = None
 
     def on_help ( self, *args ):
         self.CloudWatch_Remote.current = "help"
