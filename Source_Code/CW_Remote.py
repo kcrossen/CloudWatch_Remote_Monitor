@@ -4,6 +4,10 @@
 from __future__ import print_function
 from __future__ import division
 
+# To do:
+# ~> Add some graph above max value for initial data load view
+# ~> alarms
+
 import kivy
 kivy.require('1.10.1')
 
@@ -17,6 +21,7 @@ Config.set('graphics', 'height', str(Initialize_Window_Height))
 from kivy.lang.builder import Builder
 
 from kivy.utils import platform as Kivy_Platform
+from kivy.utils import get_hex_from_color as Hex_from_Color
 
 from kivy.app import App
 
@@ -32,11 +37,14 @@ from kivy.uix.image import Image # , AsyncImage
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.slider import Slider
+
+# from kivy.core.text import Label as CoreLabel
 from kivy.uix.label import Label
 
 from kivy.uix.textinput import TextInput
 
 from kivy.graphics import Rectangle, Line, Color
+# from kivy.graphics.instructions import InstructionGroup
 
 from kivy.clock import Clock
 
@@ -49,7 +57,7 @@ import platform
 
 from io import BytesIO
 
-import datetime, calendar, time
+import datetime, calendar # , time
 
 from collections import OrderedDict
 
@@ -202,6 +210,8 @@ Force_Duplex_Layout = True
 
 Force_GetMetricWidgetImage = False # True # False #
 
+Cursor_Tracking = True # True # False #
+
 Screen_Manager_App = True # True # False #
 
 Defer_CWapi_Requests = False # True # False #
@@ -222,29 +232,36 @@ Force_Refresh_Interval_Seconds = -1
 cw_remote_ini_json = ""
 cw_remote_ini = None
 
-# There can only ever be two graphs at one time
-graph_widget_list = [None, None]
-graph_plot_metric_statistics_list = [None, None]
-
 path_to_time_slider_cursor = ""
 path_to_time_slider_cursor_disabled = ""
 path_to_cwremote_screen_image = ""
 
+# These are specific to Kivy, cached widgets ...
+# There can be a maximum of two image/figure widgets per page (duplex), ...
+# ... or only one (simplex)
+_graph_widget_list = [None, None]
 
-# import simplejson
-#
-# def json_serial(obj):
-#     """JSON serializer for objects not serializable by default json code"""
-#
-#     if isinstance(obj, datetime.datetime):
-#         serial = obj.isoformat()
-#         return serial
-#     raise TypeError("Type not serializable")
+def get_Graph_Widget(Widget_Index):
+    global _graph_widget_list
+    return _graph_widget_list[Widget_Index]
+
+
+def set_Graph_Widget(Widget_Index, Graph_Widget):
+    global _graph_widget_list
+    _graph_widget_list[Widget_Index] = Graph_Widget
+# ... These are specific to Kivy, cached widgets
+
 
 
 # Convenience function to bound a value
 def bound ( low, high, value ):
     return max(low, min(high, value))
+
+
+def Round_DateTime (Initial_DateTime, Round_to_Resolution_Seconds=60):
+   seconds = (Initial_DateTime - Initial_DateTime.min).seconds
+   rounding = (seconds + (Round_to_Resolution_Seconds / 2)) // Round_to_Resolution_Seconds * Round_to_Resolution_Seconds
+   return Initial_DateTime + datetime.timedelta(0, (rounding - seconds), -Initial_DateTime.microsecond)
 
 
 # Local wall time, this works for New York City
@@ -520,16 +537,11 @@ def Alarm_History ( ):
             Thread(target=Describe_Alarm_History, args=(alarm_name, alarm_history_results))
         alarm_history_threads[alarm_index].start()
 
-    for alarm_index, in range(len(Alarm_Name_List)):
+    for alarm_index in range(len(Alarm_Name_List)):
         alarm_history_threads[alarm_index].join()
 
     return alarm_history_results
 
-    # alarm_history_json = simplejson.dumps(alarm_history,
-    #                                       namedtuple_as_object=True, sort_keys=True,
-    #                                       default=json_serial,  # cls=DateTimeEncoder, #
-    #                                       indent=(2 * ' '))
-    # print (alarm_history_json)
 
 def Optimize_DataPoint_Summary_Seconds ( Period_Hours ):
     datapoint_summary_seconds = 60
@@ -545,8 +557,25 @@ def Optimize_DataPoint_Summary_Seconds ( Period_Hours ):
     return datapoint_summary_seconds
 
 
+# These are specific to cw_remote, parameters for generating figures, etc. ...
+# There can be a maximum of two figures per page (duplex), or only one (simplex)
+_graph_plot_metric_statistics_list = [None, None]
+
+
+def get_Graph_Plot_Metric_Statistics(Plot_Figure_Index):
+    global _graph_plot_metric_statistics_list
+    return _graph_plot_metric_statistics_list[Plot_Figure_Index]
+
+
+def set_Graph_Plot_Metric_Statistics(Plot_Figure_Index, Graph_Plot_Metric_Statistics):
+    global _graph_plot_metric_statistics_list
+    _graph_plot_metric_statistics_list[Plot_Figure_Index] = Graph_Plot_Metric_Statistics
+# ... These are specific to cw_remote, parameters for generating figures, etc.
+
+
+# Code specific to AWS API, fetch data and render into matplotlib friendly form
 def Get_Metric_Statistics ( Metric_Descriptor, Metric_Statistics_List, Metric_Statistics_Index ):
-    these_metric_statistics = \
+    raw_metric_statistics = \
         cloudwatch_client.get_metric_statistics(MetricName=Metric_Descriptor["MetricName"],
                                                 Namespace=Metric_Descriptor["Namespace"],
                                                 Dimensions=Metric_Descriptor["Dimensions"],
@@ -555,9 +584,37 @@ def Get_Metric_Statistics ( Metric_Descriptor, Metric_Statistics_List, Metric_St
                                                 Period=Metric_Descriptor["Period"],
                                                 Statistics=Metric_Descriptor["Statistics"],
                                                 Unit=Metric_Descriptor["Unit"])
-    these_metric_statistics["MetricDescriptor"] = Metric_Descriptor
 
-    Metric_Statistics_List[Metric_Statistics_Index] = these_metric_statistics
+    raw_metric_statistics_datapoints = raw_metric_statistics.get("Datapoints", [])
+    nyc_wall_time_offset = NYC_Wall_DateTime_Offset(Metric_Descriptor["EndTime"])
+    nyc_wall_datetime_offset = datetime.timedelta(hours=int(nyc_wall_time_offset) / 100)
+    y_factor = Metric_Descriptor.get("YFactor", 1)
+
+    data_point_list = []
+    for data_point in raw_metric_statistics_datapoints:
+        data_datetime = data_point["Timestamp"]
+        # This will return some wrong local time values ...
+        # ... if StartTime and EndTime straddle standard <=> daylight savings
+        # The alternative will cause graph to have discontinuity (worse), ...
+        # ... or duplicates of time values (fatal)
+        data_datetime = data_datetime + nyc_wall_datetime_offset
+        data_maximum = data_point["Maximum"] * y_factor
+        data_average = data_point["Average"] * y_factor
+        data_point_list.append((data_datetime, data_maximum, data_average))
+    data_point_list.sort()
+
+    data_time_list = [time for time, max, avg in data_point_list]
+    data_max_list = [max for time, max, avg in data_point_list]
+    data_avg_list = [avg for time, max, avg in data_point_list]
+
+    prepared_metric_statistics = {}
+    prepared_metric_statistics["Datapoints_Time_List"] = data_time_list
+    prepared_metric_statistics["Datapoints_Maximum_List"] = data_max_list
+    prepared_metric_statistics["Datapoints_Average_List"] = data_avg_list
+
+    prepared_metric_statistics["MetricDescriptor"] = Metric_Descriptor
+
+    Metric_Statistics_List[Metric_Statistics_Index] = prepared_metric_statistics
 
 Cache_Page_Metrics = True # False # True #
 Cache_Page_Metric_Statistics = []
@@ -617,20 +674,57 @@ if (not Force_GetMetricWidgetImage):
     import matplotlib.pyplot as plotter
     from matplotlib.dates import MinuteLocator, HourLocator, DayLocator, DateFormatter
 
-    graph_plot_figure_list = [None, None]
+    # graph_plot_figure_list = [None, None]
+
+    # These are specific to matplotlib, coordinate transforms, matplotlib figure, etc. ...
+    # There can be a maximum of two figures per page (duplex), or only one (simplex)
+    _graph_plot_figure_parameters_cache = [{}, {}]
+
+    def get_Graph_Figure_Parameters ( Plot_Figure_Index ):
+        global _graph_plot_figure_parameters_cache
+        return _graph_plot_figure_parameters_cache[Plot_Figure_Index]
+
+    def set_Graph_Figure_Parameters ( Plot_Figure_Index, Graph_Plot_Figure_Parameters ):
+        global _graph_plot_figure_parameters_cache
+        _graph_plot_figure_parameters_cache[Plot_Figure_Index] = Graph_Plot_Figure_Parameters
+    # ... These are specific to matplotlib, coordinate transforms, matplotlib figure, etc.
+
+    def Graph_Figure_Time_Offset_Ratio_to_DateTime ( Plot_Figure_Index, Figure_Time_Offset_Ratio ):
+        graph_plot_figure_parameters = get_Graph_Figure_Parameters(Plot_Figure_Index)
+
+        time_offset_ratio = \
+            (Figure_Time_Offset_Ratio - graph_plot_figure_parameters["left_trim_ratio"]) / \
+            (graph_plot_figure_parameters["right_trim_ratio"] - graph_plot_figure_parameters["left_trim_ratio"])
+
+        if ((time_offset_ratio >= 0) and (time_offset_ratio <= 1)):
+            delta_time_seconds = (graph_plot_figure_parameters["maximum_time"] -
+                                  graph_plot_figure_parameters["minimum_time"]).total_seconds()
+            time_offset = (graph_plot_figure_parameters["minimum_time"] +
+                           datetime.timedelta(seconds=(delta_time_seconds * time_offset_ratio)))
+            # print (time_offset)
+            return time_offset
+        else: return None
+
+    def Graph_Figure_Time_DateTime_Values ( Plot_Figure_Index, Figure_Datetime ):
+        import bisect
+
+        values_list = []
+        metric_statistics_list = get_Graph_Plot_Metric_Statistics(Plot_Figure_Index)
+
+        for metric_statistics in metric_statistics_list:
+            metric_statistics_descriptor = metric_statistics.get("MetricDescriptor", {})
+            default_color = metric_statistics_descriptor.get("Color", [0, 0, 0])
+            value_color = tuple(metric_statistics_descriptor.get("LabelColor", default_color))
+            datapoints_time = metric_statistics.get("Datapoints_Time_List", [])
+            time_index = bisect.bisect_left(datapoints_time, Figure_Datetime)
+            datapoints_max = metric_statistics.get("Datapoints_Maximum_List", [])
+            values_list.append((str(round(datapoints_max[time_index], 1)), value_color))
+
+        return values_list
+
 
     def Graph_Get_Metric_Statistics_Datapoints ( Metric_Index, Period_End_UTC, Period_Hours ):
         period_begin_utc = Period_End_UTC - datetime.timedelta(hours=Period_Hours)
-
-        # datapoint_summary_seconds = 60
-        #
-        # # The maximum number of data points returned from a single call is 1,440.
-        # # The period for each datapoint can be 1, 5, 10, 30, 60, or any multiple of 60 seconds.
-        #
-        # datapoint_count = (Period_Hours * 60 * 60) / datapoint_summary_seconds
-        # while (datapoint_count > 1440):
-        #     datapoint_summary_seconds += 60
-        #     datapoint_count = (Period_Hours * 60 * 60) / datapoint_summary_seconds
 
         datapoint_summary_seconds = Optimize_DataPoint_Summary_Seconds(Period_Hours)
 
@@ -652,22 +746,6 @@ if (not Force_GetMetricWidgetImage):
 
         return metric_statistics_list
 
-    def Metric_Statistics_Datapoints_Time_and_Values ( Metric_Statistics_Datapoints, Y_Factor ):
-        data_point_list = []
-        for data_point in Metric_Statistics_Datapoints:
-            data_datetime = data_point["Timestamp"]
-            nyc_wall_time_offset = NYC_Wall_DateTime_Offset(data_datetime)
-            data_datetime = data_datetime + datetime.timedelta(hours=int(nyc_wall_time_offset) / 100)
-            data_maximum = data_point["Maximum"] * Y_Factor
-            data_average = data_point["Average"] * Y_Factor
-            data_point_list.append((data_datetime, data_maximum, data_average))
-        data_point_list.sort()
-
-        data_time_list = [time for time, max, avg in data_point_list]
-        data_max_list = [max for time, max, avg in data_point_list]
-        data_avg_list = [avg for time, max, avg in data_point_list]
-        return (data_time_list, data_max_list, data_avg_list)
-
     every_day = tuple([day for day in range(31)])
 
     every_hour = tuple([hour for hour in range(24)])
@@ -684,18 +762,40 @@ if (not Force_GetMetricWidgetImage):
     every_thirty_minutes = tuple([(30 * minute) for minute in range(60//30)])
 
     def Metric_Statistics_Graph_Figure ( Plot_Figure_Index,
-                                         Mertric_Statistics_List,
                                          Graph_Width, Graph_Height,
                                          Time_Axis_Limit_Offset_Ratios=(0, 1),
-                                         Value_Axis_Limit_Offset_Ratios=(0, 1) ):
+                                         Value_Axis_Limit_Offset_Ratios=(-0.0000001, 1.025) ):
+        # Time_Axis_Limit_Offset_Ratios is (minimum_time_value_clip, maximum_time_value_clip) expressed ...
+        # ... as ratios on the entire plotted figure. A transform will be applied to transform these ratios into ...
+        # ... their equivalents on the axis-bound data plot area (i.e. excluding axis labels and titles). These ...
+        # ... ratios will be used to "zoom" the plot area, i.e. enlarge a smaller subset of the data to occupy ...
+        # ... the entire data plot area so that finer data detail is clearer.
 
-        global graph_plot_figure_list
+        # Value_Axis_Limit_Offset_Ratios is (minimum_value_clip, maximum_value_clip) expressed two alternative ...
+        # ... ways. As shown with the defaults, this is used to select a plotted y value range outside the ...
+        # ... minimum and maximum y data values. A negative minimum_value_clip between zero and -0.000001 (10^-6) ...
+        # ... clamps the bottom of the plot area to zero, and a more negative value includes (possibly empty) area ...
+        # ... below zero. A positive maximum_value_clip larger than one, e.g. 1.025, includes a small area above ...
+        # ... the maximum y data value. This allows the user to visually confirm that their y data values are not ...
+        # ... being clipped. Setting Value_Axis_Limit_Offset_Ratios=(0, 1) will cause the the data plot area to ...
+        # ... exactly fit the plotted data values. The minimum y data value will touch the plot area bottom, and ...
+        # ... maximum y data value will touch the plot area top. Values of minimum_value_clip and ...
+        # ... maximum_value_clip between zero and one are treated in the same way explained above for ...
+        # ... Time_Axis_Limit_Offset_Ratios.
 
-        existing_plot_figure = graph_plot_figure_list[Plot_Figure_Index]
+        # global _graph_plot_figure_parameters_cache # , graph_plot_figure_list
+
+        # existing_plot_figure = graph_plot_figure_list[Plot_Figure_Index]
+        graph_plot_figure_parameters = get_Graph_Figure_Parameters(Plot_Figure_Index)
+        existing_plot_figure = graph_plot_figure_parameters.get("Figure", None)
         # Reusing plot_figure leaves accumulated trash from previous plotting, recycle it!
         if (existing_plot_figure is not None): plotter.close(existing_plot_figure)
 
+        metric_statistics_list = get_Graph_Plot_Metric_Statistics(Plot_Figure_Index)
+
         plot_figure = plotter.figure(figsize=((Graph_Width / 100), (Graph_Height / 100)), dpi=100)
+
+        graph_plot_figure_parameters = {}
 
         line_width = 0.75
 
@@ -724,12 +824,10 @@ if (not Force_GetMetricWidgetImage):
 
         require_right_y_axis = False
 
-        for metric_stats in reversed(Mertric_Statistics_List):
-            metric_stats_descriptor = metric_stats.get("MetricDescriptor", {})
-            metric_stats_datapoints = metric_stats.get("Datapoints", [])
-            datapoints_time, datapoints_max, datapoints_avg = \
-                Metric_Statistics_Datapoints_Time_and_Values(metric_stats_datapoints,
-                                                             metric_stats_descriptor.get("YFactor", 1))
+        for metric_statistics in reversed(metric_statistics_list):
+            metric_stats_descriptor = metric_statistics.get("MetricDescriptor", {})
+            datapoints_time = metric_statistics.get("Datapoints_Time_List", [])
+            datapoints_max = metric_statistics.get("Datapoints_Maximum_List", [])
 
             if ((minimum_time is None) and (maximum_time is None)):
                 # cpu_time is sorted, so this can work
@@ -809,30 +907,73 @@ if (not Force_GetMetricWidgetImage):
 
         axes.set_xlim(minimum_time, maximum_time)
 
-        # Potentially adjust value scale to zoom ...
+        graph_plot_figure_parameters["left_trim_ratio"] = left_trim_ratio
+        graph_plot_figure_parameters["right_trim_ratio"] = right_trim_ratio
+        graph_plot_figure_parameters["bottom_trim_ratio"] = bottom_trim_ratio
+        graph_plot_figure_parameters["top_trim_ratio"] = top_trim_ratio
+
+        graph_plot_figure_parameters["minimum_time"] = minimum_time
+        graph_plot_figure_parameters["maximum_time"] = maximum_time
+
         minimum_value_offset_ratio, maximum_value_offset_ratio = Value_Axis_Limit_Offset_Ratios
-        minimum_value_offset_ratio = \
-            max((minimum_value_offset_ratio - bottom_trim_ratio) / (top_trim_ratio - bottom_trim_ratio), 0)
-        maximum_value_offset_ratio = \
-            min((maximum_value_offset_ratio - bottom_trim_ratio) / (top_trim_ratio - bottom_trim_ratio), 1)
+        if (not ((minimum_value_offset_ratio == 0) and (maximum_value_offset_ratio == 1))):
+            if (minimum_value_offset_ratio >= 0):
+                minimum_value_offset_ratio = \
+                    max((minimum_value_offset_ratio - bottom_trim_ratio) / (top_trim_ratio - bottom_trim_ratio), -0.000001)
+            if (maximum_value_offset_ratio <= 1):
+                maximum_value_offset_ratio = \
+                    min((maximum_value_offset_ratio - bottom_trim_ratio) / (top_trim_ratio - bottom_trim_ratio), 1)
 
         if (not ((minimum_value_offset_ratio == 0) and (maximum_value_offset_ratio == 1))):
+            # Potentially adjust value scale to zoom ...
             left_delta_value = left_axis_maximum_value - left_axis_minimum_value
-            left_axis_maximum_value = left_axis_minimum_value + (left_delta_value * maximum_value_offset_ratio)
-            # MUST calculate maximum_value BEFORE minimum_value, otherwise minimum_value is "corrupted"
-            left_axis_minimum_value = left_axis_minimum_value + (left_delta_value * minimum_value_offset_ratio)
-        # ... Potentially adjust value scale to zoom
+            if ((minimum_value_offset_ratio < 0) or (maximum_value_offset_ratio > 1)):
+                # This is to expand the view so than minimums and maximums do not touch graph box
+                if (maximum_value_offset_ratio > 1):
+                    left_axis_maximum_value *= maximum_value_offset_ratio
+                else:
+                    left_axis_maximum_value = left_axis_minimum_value + (left_delta_value * maximum_value_offset_ratio)
+                # MUST calculate maximum_value BEFORE minimum_value, otherwise minimum_value is "corrupted"
+                if (minimum_value_offset_ratio < 0):
+                    if (minimum_value_offset_ratio >= -0.000001):
+                        # Clamp graph range bottom to zero
+                        left_axis_minimum_value = 0
+                    else:
+                        left_axis_minimum_value = \
+                            left_axis_minimum_value - (left_delta_value * abs(minimum_value_offset_ratio))
+            elif ((minimum_value_offset_ratio > 0) or (maximum_value_offset_ratio < 1)):
+                left_axis_maximum_value = left_axis_minimum_value + (left_delta_value * maximum_value_offset_ratio)
+                # MUST calculate maximum_value BEFORE minimum_value, otherwise minimum_value is "corrupted"
+                left_axis_minimum_value = left_axis_minimum_value + (left_delta_value * minimum_value_offset_ratio)
+            # ... Potentially adjust value scale to zoom
 
         axes.set_ylim(left_axis_minimum_value, left_axis_maximum_value)
 
         if (require_right_y_axis):
-            # Potentially adjust value scale to zoom ...
             if (not ((minimum_value_offset_ratio == 0) and (maximum_value_offset_ratio == 1))):
+                # Potentially adjust value scale to zoom ...
                 right_delta_value = right_axis_maximum_value - right_axis_minimum_value
-                right_axis_maximum_value = right_axis_minimum_value + (right_delta_value * maximum_value_offset_ratio)
-                # MUST calculate maximum_value BEFORE minimum_value, otherwise minimum_value is "corrupted"
-                right_axis_minimum_value = right_axis_minimum_value + (right_delta_value * minimum_value_offset_ratio)
-            # ... Potentially adjust value scale to zoom
+                if ((minimum_value_offset_ratio < 0) or (maximum_value_offset_ratio > 1)):
+                    # This is to expand the view so than minimums and maximums do not touch graph box
+                    if (maximum_value_offset_ratio > 1):
+                        right_axis_maximum_value *= maximum_value_offset_ratio
+                    else:
+                        right_axis_maximum_value = \
+                            right_axis_minimum_value + (right_delta_value * maximum_value_offset_ratio)
+                    # MUST calculate maximum_value BEFORE minimum_value, otherwise minimum_value is "corrupted"
+                    if (minimum_value_offset_ratio < 0):
+                        if (minimum_value_offset_ratio >= -0.000001):
+                            # Clamp graph range bottom to zero
+                            right_axis_minimum_value = 0
+                        else:
+                            right_axis_minimum_value = \
+                                right_axis_minimum_value - (right_delta_value * abs(minimum_value_offset_ratio))
+                elif ((minimum_value_offset_ratio > 0) or (maximum_value_offset_ratio < 1)):
+                    # This is a value scale to zoom
+                    right_axis_maximum_value = right_axis_minimum_value + (right_delta_value * maximum_value_offset_ratio)
+                    # MUST calculate maximum_value BEFORE minimum_value, otherwise minimum_value is "corrupted"
+                    right_axis_minimum_value = right_axis_minimum_value + (right_delta_value * minimum_value_offset_ratio)
+                # ... Potentially adjust value scale to zoom
 
             axis_2.set_ylim(right_axis_minimum_value, right_axis_maximum_value)
 
@@ -902,7 +1043,7 @@ if (not Force_GetMetricWidgetImage):
 
         plotter.setp(axes.get_xticklabels(), rotation=0, ha="center")
 
-        axes.grid(True)
+        axes.grid(True, linewidth=0.66, color=(0.8, 0.8, 0.8, 0.2))
 
         # Trim off real estate wasting margins
         plotter.subplots_adjust(left=left_trim_ratio, bottom=bottom_trim_ratio,
@@ -911,7 +1052,9 @@ if (not Force_GetMetricWidgetImage):
         canvas = FigureCanvas(plot_figure)
         canvas.draw()
 
-        graph_plot_figure_list[Plot_Figure_Index] = plot_figure
+        # graph_plot_figure_list[Plot_Figure_Index] = plot_figure
+        graph_plot_figure_parameters["Figure"] = plot_figure
+        set_Graph_Figure_Parameters(Plot_Figure_Index, graph_plot_figure_parameters)
 
         return canvas
 
@@ -1303,6 +1446,7 @@ class CW_Remote ( App ):
 
             self.clear_touch()
 
+            Window.bind(mouse_pos=self.on_mouse_position)
             Window.bind(on_key_down=self.on_keyboard_down)
 
             Vertical_Graph_Height_Factor = 0.96
@@ -1527,11 +1671,13 @@ class CW_Remote ( App ):
                 self.get_cloudwatch_graph(self.Graph_Offset + 1)
 
                 if (self.Image_Widget):
-                    self.Duplex_Upper_Graph_Box.add_widget(Image(texture=graph_widget_list[0].texture))
-                    self.Duplex_Lower_Graph_Box.add_widget(Image(texture=graph_widget_list[1].texture))
+                    image_widget_0 = get_Graph_Widget(0)
+                    self.Duplex_Upper_Graph_Box.add_widget(Image(texture=image_widget_0.texture))
+                    image_widget_1 = get_Graph_Widget(1)
+                    self.Duplex_Lower_Graph_Box.add_widget(Image(texture=image_widget_1.texture))
                 else:
-                    self.Duplex_Upper_Graph_Box.add_widget(graph_widget_list[0])
-                    self.Duplex_Lower_Graph_Box.add_widget(graph_widget_list[1])
+                    self.Duplex_Upper_Graph_Box.add_widget(get_Graph_Widget(0))
+                    self.Duplex_Lower_Graph_Box.add_widget(get_Graph_Widget(1))
 
             elif (self.Visible_Graph_Count == 1):
                 self.Simplex_Lower_Graph_Box.clear_widgets()
@@ -1543,25 +1689,22 @@ class CW_Remote ( App ):
                 self.get_cloudwatch_graph(self.Graph_Offset + 0)
 
                 if (self.Image_Widget):
-                    self.Simplex_Lower_Graph_Box.add_widget(Image(texture=graph_widget_list[0].texture))
+                    image_widget_0 = get_Graph_Widget(0)
+                    self.Simplex_Lower_Graph_Box.add_widget(Image(texture=image_widget_0.texture))
                 else:
-                    self.Simplex_Lower_Graph_Box.add_widget(graph_widget_list[0])
+                    self.Simplex_Lower_Graph_Box.add_widget(get_Graph_Widget(0))
 
         self.CloudWatch_Remote.canvas.ask_update()
         return True
 
     # Fetch the AWS/CW Dashboard widget images
     def get_cloudwatch_graph ( self, Graph_Index ):
-        # global Widget_Image_Descriptor_List
-        global graph_plot_metric_statistics_list
-        global graph_widget_list
-
         graph_widget_list_index = Graph_Index - self.Graph_Offset
 
         if (self.Image_Widget):
-            ci_widget_image = graph_widget_list[graph_widget_list_index]
+            ci_widget_image = get_Graph_Widget(graph_widget_list_index)
             if (ci_widget_image is not None): ci_widget_image.remove_from_cache()
-            graph_widget_list[graph_widget_list_index] = None
+            set_Graph_Widget(graph_widget_list_index, None)
 
             now_datetime_utc = datetime.datetime.now(UTC_Time_Zone)
             time_zone_offset_string = NYC_Wall_DateTime_Offset(now_datetime_utc)
@@ -1588,12 +1731,12 @@ class CW_Remote ( App ):
                 # ... but allows arbitrary latency to be simulated
                 time.sleep(Testing_Bypass_Initialization_Delay_Seconds)
             # Park the coreimage widget for deferred inclusion in UI
-            graph_widget_list[graph_widget_list_index] = \
-                CoreImage(data, ext="png", filename=("widget_image_" + str(Graph_Index) + ".png"))
+            image_widget =  CoreImage(data, ext="png", filename=("widget_image_" + str(Graph_Index) + ".png"))
+            set_Graph_Widget(graph_widget_list_index, image_widget)
 
         else: # Figure_Widget
-            graph_widget_list[graph_widget_list_index] = None
-            graph_plot_metric_statistics_list[graph_widget_list_index] = None
+            set_Graph_Widget(graph_widget_list_index, None)
+            set_Graph_Plot_Metric_Statistics(graph_widget_list_index, None)
 
             datetime_now_utc = datetime.datetime.now(UTC_Time_Zone)
             period_end_utc = datetime_now_utc - datetime.timedelta(hours=self.Period_End_Hours_Ago)
@@ -1613,25 +1756,22 @@ class CW_Remote ( App ):
                     Graph_Get_Metric_Statistics_Datapoints(Graph_Index, period_end_utc, self.Period_Duration_Hours)
 
             # Preserve for potential zoom
-            graph_plot_metric_statistics_list[graph_widget_list_index] = metric_statistics_list
+            set_Graph_Plot_Metric_Statistics(graph_widget_list_index, metric_statistics_list)
 
             metric_figure_widget = \
                 Metric_Statistics_Graph_Figure(graph_widget_list_index,
-                                               metric_statistics_list,
                                                graph_width, graph_height)
 
             # Park the figure widget for deferred inclusion in UI
-            graph_widget_list[graph_widget_list_index] = metric_figure_widget
+            set_Graph_Widget(graph_widget_list_index, metric_figure_widget)
 
     def zoom_cloudwatch_graph ( self, Widget_List_Index,
-                                Time_Axis_Zoom_Offset_Ratios=(0, 1), Value_AxisZoom_Offset_Ratios=(0, 1) ):
-        global graph_plot_metric_statistics_list
-        global graph_widget_list
-
+                                Time_Axis_Zoom_Offset_Ratios=(0, 1),
+                                Value_Axis_Zoom_Offset_Ratios=(-0.0000001, 1.025) ):
         graph_widget_list_index = Widget_List_Index
 
-        # Figure_Widget
-        graph_widget_list[graph_widget_list_index] = None
+        # Figure_Widget, zoomed widget is different widget
+        set_Graph_Widget(graph_widget_list_index, None)
 
         graph_width = self.Horizontal_Graph_Width
         graph_height = self.Vertical_Graph_Height
@@ -1641,18 +1781,107 @@ class CW_Remote ( App ):
         elif (self.Visible_Graph_Count == 1):
             graph_height = int(round(self.Vertical_Graph_Height))
 
-        # Preserve for potential zoom
-        metric_statistics_list = graph_plot_metric_statistics_list[graph_widget_list_index]
-
         metric_figure_widget = \
             Metric_Statistics_Graph_Figure(graph_widget_list_index,
-                                           metric_statistics_list,
                                            graph_width, graph_height,
                                            Time_Axis_Limit_Offset_Ratios=Time_Axis_Zoom_Offset_Ratios,
-                                           Value_Axis_Limit_Offset_Ratios=Value_AxisZoom_Offset_Ratios)
+                                           Value_Axis_Limit_Offset_Ratios=Value_Axis_Zoom_Offset_Ratios)
 
         # Park the figure widget for deferred inclusion in UI
-        graph_widget_list[graph_widget_list_index] = metric_figure_widget
+        set_Graph_Widget(graph_widget_list_index, metric_figure_widget)
+
+
+    def on_mouse_position ( self, window, position ):
+        if ((self.Image_Widget) or (not Cursor_Tracking)): return False
+
+        mouse_position_x, mouse_position_y = position
+        instance = None
+        # The plot_figure_index represents the ordinal position ...
+        # ... from top (0) to bottom ( > 0) of a graph/figure
+        plot_figure_index = -1
+        if (self.Duplex_Upper_Graph_Box.collide_point(mouse_position_x, mouse_position_y)):
+            instance = self.Duplex_Upper_Graph_Box
+            plot_figure_index = 0
+        elif (self.Simplex_Lower_Graph_Box.collide_point(mouse_position_x, mouse_position_y)):
+            instance = self.Simplex_Lower_Graph_Box
+            plot_figure_index = 0
+        elif (self.Duplex_Lower_Graph_Box.collide_point(mouse_position_x, mouse_position_y)):
+            instance = self.Duplex_Lower_Graph_Box
+            plot_figure_index = 1
+
+        for clear_instance in [self.Duplex_Upper_Graph_Box, self.Duplex_Lower_Graph_Box,
+                               self.Simplex_Lower_Graph_Box]:
+            clear_instance.canvas.remove_group("datetime_text_group")
+
+        if ((instance is not None) and (plot_figure_index >= 0)):
+            instance_left, instance_bottom = instance.pos
+            mouse_position_ratio_horizontal = bound(0, 1, ((mouse_position_x - instance_left) / instance.width))
+            mouse_position_datetime = \
+                Graph_Figure_Time_Offset_Ratio_to_DateTime (plot_figure_index, mouse_position_ratio_horizontal)
+
+            if (mouse_position_datetime is not None):
+                mouse_position_datetime = mouse_position_datetime + datetime.timedelta(microseconds=500000)
+                mouse_position_datetime = mouse_position_datetime + datetime.timedelta(seconds=30)
+                mouse_position_datetime = \
+                    (mouse_position_datetime - datetime.timedelta(seconds=mouse_position_datetime.second) -
+                     datetime.timedelta(microseconds=mouse_position_datetime.microsecond))
+                values_list = Graph_Figure_Time_DateTime_Values(plot_figure_index, mouse_position_datetime)
+
+                mouse_position_datetime_text = ""
+                mouse_position_datetime_text += "[color=" + Hex_from_Color((0, 0, 0, 0.825)) + "]"
+                mouse_position_datetime_text += str(mouse_position_datetime)[:-9]
+                mouse_position_datetime_text += "[/color]"
+
+                if (len(values_list) > 0):
+                    mouse_position_datetime_text += \
+                        "[color=" + Hex_from_Color((0, 0, 0, 0.825)) + "]" + "\n(" + "[/color]"
+
+                    for value_index, value in enumerate(values_list):
+                        value_text, value_color = value
+                        if (value_index > 0):
+                            leading_space = " " * max((3 * (5 - len(value_text))), 1)
+                        else: leading_space = ""
+                        mouse_position_datetime_text += \
+                            leading_space + "[color=" + Hex_from_Color(value_color) + "]" + value_text + "[/color]"
+                        if (value_index < (len(values_list) - 1)):
+                            mouse_position_datetime_text += \
+                                "[color=" + Hex_from_Color((0, 0, 0, 0.825)) + "]" + "," + "[/color]"
+
+                    mouse_position_datetime_text += \
+                        "[color=" + Hex_from_Color((0, 0, 0, 0.825)) + "]" + ")" + "[/color]"
+
+                datetime_label = Label(text=mouse_position_datetime_text, font_size=14, markup=True)
+                # datetime_label.refresh()
+                datetime_label.texture_update()
+                datetime_text = datetime_label.texture
+
+                figure_parameters = get_Graph_Figure_Parameters(plot_figure_index)
+                # Keep cursor tracking out of the way of the cursor itself and the data it's exploring
+                if (mouse_position_ratio_horizontal > 0.5):
+                    datetime_text_left = instance_left + (instance.width * figure_parameters["left_trim_ratio"]) + 6
+                else:
+                    datetime_text_left = \
+                        instance_left + (instance.width * figure_parameters["right_trim_ratio"]) - \
+                        datetime_text.width - 6
+
+                datetime_text_bottom = \
+                    instance_bottom + (instance.height * figure_parameters["top_trim_ratio"]) - datetime_text.height - 6
+
+                # instance.canvas.add(Color(0.5, 0, 0, .75, mode='rgba', group="datetime_text_group"))
+                instance.canvas.add(Rectangle(size=datetime_text.size,
+                                              pos=[datetime_text_left, datetime_text_bottom],
+                                              texture=datetime_text, group="datetime_text_group"))
+                instance.canvas.add(Color(0, 0, 0, .5, mode='rgba', group="datetime_text_group"))
+                instance.canvas.add(Line(points=(mouse_position_x,
+                                                 (instance_bottom + (instance.height * figure_parameters["bottom_trim_ratio"])),
+                                                 mouse_position_x,
+                                                 (instance_bottom + (instance.height * figure_parameters["top_trim_ratio"]))),
+                                         width=1, group="datetime_text_group"))
+
+
+                instance.canvas.ask_update()
+
+        return True
 
 
     def on_touch_down ( self, instance, touch, *args ):
@@ -1741,19 +1970,19 @@ class CW_Remote ( App ):
         graph_widget_list_index = self.Touch_Down_Index
         self.zoom_cloudwatch_graph(graph_widget_list_index,
                                    Time_Axis_Zoom_Offset_Ratios=time_axis_zoom_offset_ratios,
-                                   Value_AxisZoom_Offset_Ratios=value_axis_zoom_offset_ratios)
+                                   Value_Axis_Zoom_Offset_Ratios=value_axis_zoom_offset_ratios)
 
         if (instance.id == "Duplex_Upper_Graph_Box"):
             self.Duplex_Upper_Graph_Box.clear_widgets()
-            self.Duplex_Upper_Graph_Box.add_widget(graph_widget_list[0])
+            self.Duplex_Upper_Graph_Box.add_widget(get_Graph_Widget(0))
 
         elif (instance.id == "Duplex_Lower_Graph_Box"):
             self.Duplex_Lower_Graph_Box.clear_widgets()
-            self.Duplex_Lower_Graph_Box.add_widget(graph_widget_list[1])
+            self.Duplex_Lower_Graph_Box.add_widget(get_Graph_Widget(1))
 
         elif (instance.id == "Simplex_Lower_Graph_Box"):
             self.Simplex_Lower_Graph_Box.clear_widgets()
-            self.Simplex_Lower_Graph_Box.add_widget(graph_widget_list[0])
+            self.Simplex_Lower_Graph_Box.add_widget(get_Graph_Widget(0))
 
         self.CloudWatch_Remote.canvas.ask_update()
         return True
@@ -1764,15 +1993,15 @@ class CW_Remote ( App ):
 
         if (self.Touch_Down_Instance_Id == "Duplex_Upper_Graph_Box"):
             self.Duplex_Upper_Graph_Box.clear_widgets()
-            self.Duplex_Upper_Graph_Box.add_widget(graph_widget_list[0])
+            self.Duplex_Upper_Graph_Box.add_widget(get_Graph_Widget(0))
 
         elif (self.Touch_Down_Instance_Id == "Duplex_Lower_Graph_Box"):
             self.Duplex_Lower_Graph_Box.clear_widgets()
-            self.Duplex_Lower_Graph_Box.add_widget(graph_widget_list[1])
+            self.Duplex_Lower_Graph_Box.add_widget(get_Graph_Widget(1))
 
         elif (self.Touch_Down_Instance_Id == "Simplex_Lower_Graph_Box"):
             self.Simplex_Lower_Graph_Box.clear_widgets()
-            self.Simplex_Lower_Graph_Box.add_widget(graph_widget_list[0])
+            self.Simplex_Lower_Graph_Box.add_widget(get_Graph_Widget(0))
 
         self.clear_touch()
 
