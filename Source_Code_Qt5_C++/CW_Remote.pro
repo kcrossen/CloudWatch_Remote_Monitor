@@ -11,10 +11,17 @@ TEMPLATE = app
 
 HEADERS += \
     CW_Remote.h \
+    ChartView.h \
+    ControlBar.h \
+    AWS_Metrics.h \
+    json_helpers.h \
     curl.h
 
 SOURCES += \
-    CW_Remote.cpp
+    CW_Remote.cpp \
+    ChartView.cpp \
+    ControlBar.cpp \
+    json_helpers.cpp
 
 macx:LIBS += -framework CoreFoundation
 

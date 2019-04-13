@@ -30,19 +30,14 @@
 
 //$ /Users/Ken/Qt/5.12.2/clang_64/bin/macdeployqt CW_Remote.app
 
+
 #include "CW_Remote.h"
 
 using namespace Aws;
 using namespace Aws::Auth;
+using namespace Aws::Client;
 using namespace Aws::CloudWatch;
 using namespace Aws::CloudWatch::Model;
-
-QT_CHARTS_USE_NAMESPACE
-
-static
-int bound ( int low, int high, int value ) {
-    return qMax(low, qMin(high, value));
-}
 
 static
 int Optimize_DataPoint_Summary_Seconds ( int Period_Hours ) {
@@ -64,6 +59,8 @@ static
 int Initial_Period_Duration_Hours = 24;
 static
 int Initial_Period_End_Hours_Ago = 0;
+static
+bool Fetch_Alarm_History = false;
 
 static
 CW_Remote *CW_Remote_Main_Window;
@@ -78,13 +75,7 @@ static
 QJsonArray Alarm_Name_List;
 
 static
-Aws::CloudWatch::CloudWatchClient *CloudWatch_Client = nullptr;
-
-static
-QVector<Graph_Metric_Statistics> Cache_Graph_Metric_Statistics;
-
-static
-QVector<Page_Metric_Statistics> Cache_Page_Metric_Statistics;
+CloudWatchClient *CloudWatch_Client = nullptr;
 
 static
 QVector<Metric_Statistics_Descriptor> Upper_Graph_Metric_Statistics;
@@ -92,14 +83,6 @@ QVector<Metric_Statistics_Descriptor> Upper_Graph_Metric_Statistics;
 static
 QVector<Metric_Statistics_Descriptor> Lower_Graph_Metric_Statistics;
 
-QString
-get_json_string_value ( QJsonObject Json_Obj,
-                        QString Value_Name, QString Value_Default ) {
-    QString value = Value_Default;
-    if (Json_Obj.contains(Value_Name) and Json_Obj[Value_Name].isString())
-        value = Json_Obj[Value_Name].toString();
-    return value;
-}
 
 static
 void
@@ -488,20 +471,18 @@ int main ( int argc, char* argv[] ) {
     credentials.SetAWSAccessKeyId(aws_access_id.toStdString());
     credentials.SetAWSSecretKey(aws_secret_key.toStdString());
 
-    Aws::Client::ClientConfiguration client_configuration;
+    ClientConfiguration client_configuration;
     client_configuration.region = region_name.toStdString();
     client_configuration.scheme = Aws::Http::Scheme::HTTPS;
     client_configuration.connectTimeoutMs = 30000;
     client_configuration.requestTimeoutMs = 120000;
 
-    Aws::CloudWatch::CloudWatchClient cloudwatch_client(credentials, client_configuration);
+    CloudWatchClient cloudwatch_client(credentials, client_configuration);
     CloudWatch_Client = &cloudwatch_client;
 
     CW_Remote MainWindow;
     MainWindow.setContentsMargins(0, 0, 0, 0);
     MainWindow.show();
-
-    // MainWindow.CW_Remote_Screen_Widget->Update_ChartView_Data();
 
     int return_code = Application.exec();
 
@@ -547,7 +528,7 @@ CW_Remote_Screen::CW_Remote_Screen ( QWidget *parent ) : QWidget ( parent ) {
 
     Upper_Chartview = new ChartView();
 
-    Control_Bar = new ControlBar();
+    Control_Bar = new ControlBar(Initial_Period_Duration_Hours, Initial_Period_End_Hours_Ago);
     connect(Control_Bar, SIGNAL(metricsUpdate()), this, SLOT(update_page_metrics()));
     connect(Control_Bar, SIGNAL(metricsPrevious()), this, SLOT(previous_page_metrics()));
     connect(Control_Bar, SIGNAL(metricsNext()), this, SLOT(next_page_metrics()));
@@ -604,7 +585,8 @@ CW_Remote_Screen::timer_update_page_metrics (  ) {
          (Upper_Chartview->zoom_level == 0) and (Lower_Chartview->zoom_level == 0)) or
         ((Visible_Graph_Count == 1) and (Lower_Chartview->zoom_level == 0))) update_page_metrics();
 
-    QMap<QString, QStringList> alarm_history = Alarm_History(Alarm_Name_List);
+    if (Fetch_Alarm_History)
+        QMap<QString, QStringList> alarm_history = Alarm_History(Alarm_Name_List);
 }
 
 void
@@ -716,591 +698,3 @@ CW_Remote_Screen::set_main_window_title (  ) {
         CW_Remote_Main_Window->setWindowTitle(main_window_title);
     }
 }
-
-
-struct LineSeries_LineSeriesName {
-    QtCharts::QLineSeries* line_series;
-    QString line_series_name;
-};
-
-
-ChartView::ChartView ( QWidget *parent ) : QtCharts::QChartView ( parent ) {
-    setContentsMargins(0, 0, 0, 0);
-
-    has_data = false;
-
-    zoom_level = 0;
-    zoom_factor = 4;
-
-    chart = new QtCharts::QChart();
-    chart->setBackgroundRoundness(0);
-    chart->layout()->setContentsMargins(0, 0, 0, 0);
-    QMargins chart_margins = chart->margins();
-    chart_margins.setTop(0);
-    chart_margins.setBottom(0);
-    chart->setMargins(chart_margins);
-
-    axisX = nullptr;
-    axisX_top = nullptr;
-    axisY_left = nullptr;
-    axisY_right = nullptr;
-
-    setChart(chart);
-    setRenderHint(QPainter::Antialiasing);
-
-    setAttribute(Qt::WA_AlwaysShowToolTips);
-    setMouseTracking(true);
-
-    chartview_scene = scene();
-    plot_area_box_item = nullptr;
-}
-
-void
-ChartView::setChartData ( const QVector<Metric_Statistics_Descriptor> Chart_Metric_Statistics_List ) {
-    chart->removeAllSeries();
-    // Axes "remember" their previous state, ...
-    // ... if not removed, previous min/max values will displayed
-    if (axisX) chart->removeAxis(axisX);
-    if (axisX_top) chart->removeAxis(axisX_top);
-    if (axisY_left) chart->removeAxis(axisY_left);
-    if (axisY_right) chart->removeAxis(axisY_right);
-
-    // Replace with new "stateless" axes
-    axisX = new QtCharts::QDateTimeAxis();
-    axisX_top = new QtCharts::QDateTimeAxis();
-    chart->addAxis(axisX, Qt::AlignBottom);
-    chart->addAxis(axisX_top, Qt::AlignTop);
-
-    int left_y_axis_series_count = 0;
-    int right_y_axis_series_count = 0;
-
-    for (int idx = 0; idx < Chart_Metric_Statistics_List.size(); idx++) {
-        QJsonObject metric_descriptor = Chart_Metric_Statistics_List[idx].Metric_Descriptor;
-        QString which_y_axis = get_json_string_value(metric_descriptor,"YAxis", "left");
-        if (which_y_axis == "left") left_y_axis_series_count += 1;
-        else if (which_y_axis == "right") right_y_axis_series_count += 1;
-    }
-
-    if (left_y_axis_series_count > 0) {
-        axisY_left = new QtCharts::QValueAxis();
-        chart->addAxis(axisY_left, Qt::AlignLeft);
-    }
-
-    if (right_y_axis_series_count > 0) {
-        axisY_right = new QtCharts::QValueAxis();
-        chart->addAxis(axisY_right, Qt::AlignRight);
-    }
-
-    QList<Metric_Statistics_Datapoint> datapoints =
-        Chart_Metric_Statistics_List[0].Datapoints_Maximum_List;
-
-    QDateTime data_min_datetime = datapoints[0].datapoint_datetime;
-    QDateTime data_max_datetime = datapoints[0].datapoint_datetime;
-
-    for (int idx = 1; idx < datapoints.size(); idx++) {
-        if (datapoints[idx].datapoint_datetime < data_min_datetime)
-            data_min_datetime = datapoints[idx].datapoint_datetime;
-        if (datapoints[idx].datapoint_datetime > data_max_datetime)
-            data_max_datetime = datapoints[idx].datapoint_datetime;
-    }
-
-    uint min_unixtime  = data_min_datetime.toTime_t();
-    QDateTime data_min_datetime_quantized;
-    data_min_datetime_quantized.setTime_t(min_unixtime - (min_unixtime % (60 * 60)));
-
-    uint max_unixtime  = data_max_datetime.toTime_t();
-    QDateTime data_max_datetime_quantized;
-    data_max_datetime_quantized.setTime_t(max_unixtime + ((60 * 60) - max_unixtime % (60 * 60)));
-
-    QtCharts::QLineSeries *workaround_line_series = new QtCharts::QLineSeries();
-    workaround_line_series->append(QDateTime(data_min_datetime_quantized).toMSecsSinceEpoch(), 0);
-    workaround_line_series->append(QDateTime(data_max_datetime_quantized).toMSecsSinceEpoch(), 0);
-    QPen pen = workaround_line_series->pen();
-    pen.setWidth(1);
-    pen.setColor("lightgray");
-    workaround_line_series->setPen(pen);
-
-    chart->addSeries(workaround_line_series);
-    workaround_line_series->attachAxis(axisX);
-    if (left_y_axis_series_count > 0) workaround_line_series->attachAxis(axisY_left);
-    else if (right_y_axis_series_count > 0) workaround_line_series->attachAxis(axisY_right);
-
-    double data_min_value_left = 0;
-    double data_max_value_left = 0;
-    double data_min_value_right = 0;
-    double data_max_value_right = 0;
-
-    QVector<LineSeries_LineSeriesName> line_series_left_list;
-    QVector<LineSeries_LineSeriesName> line_series_right_list;
-
-    for (int idx = (Chart_Metric_Statistics_List.size() - 1); idx >= 0; idx--) {
-        QJsonObject metric_descriptor = Chart_Metric_Statistics_List[idx].Metric_Descriptor;
-        QString which_y_axis = get_json_string_value(metric_descriptor,"YAxis", "left");
-
-        QList<Metric_Statistics_Datapoint> datapoints =
-            Chart_Metric_Statistics_List[idx].Datapoints_Maximum_List;
-
-        QtCharts::QLineSeries *line_series = new QtCharts::QLineSeries();
-
-        for (int idx = 1; idx < datapoints.size(); idx++) {
-            if (datapoints[idx].datapoint_datetime < data_min_datetime)
-                data_min_datetime = datapoints[idx].datapoint_datetime;
-            if (datapoints[idx].datapoint_datetime > data_max_datetime)
-                data_max_datetime = datapoints[idx].datapoint_datetime;
-
-            if (which_y_axis == "left") {
-                if (datapoints[idx].datapoint_value < data_min_value_left)
-                    data_min_value_left = datapoints[idx].datapoint_value;
-                if (datapoints[idx].datapoint_value > data_max_value_left)
-                    data_max_value_left = datapoints[idx].datapoint_value;
-            }
-            else if (which_y_axis == "right") {
-                if (datapoints[idx].datapoint_value < data_min_value_right)
-                    data_min_value_right = datapoints[idx].datapoint_value;
-                if (datapoints[idx].datapoint_value > data_max_value_right)
-                    data_max_value_right = datapoints[idx].datapoint_value;
-            }
-
-            line_series->append(QDateTime(datapoints[idx].datapoint_datetime).toMSecsSinceEpoch(),
-                                datapoints[idx].datapoint_value);
-        }
-
-        QColor line_color = QColor().fromRgb(0, 0, 0);
-        if (metric_descriptor.contains("Color") and
-            metric_descriptor["Color"].isArray()) {
-            QJsonArray color_values = metric_descriptor["Color"].toArray();
-            line_color = QColor().fromRgbF(color_values[0].toDouble(),
-                                           color_values[1].toDouble(),
-                                           color_values[2].toDouble());
-        }
-
-        QPen pen = line_series->pen();
-        pen.setWidth(0);
-        pen.setColor(line_color);
-        line_series->setPen(pen);
-
-        chart->addSeries(line_series);
-        line_series->attachAxis(axisX);
-        if (which_y_axis == "left") line_series->attachAxis(axisY_left);
-        else if (which_y_axis == "right") line_series->attachAxis(axisY_right);
-
-        QString line_series_label = get_json_string_value(metric_descriptor,"MetricLabel", " ");
-        if (which_y_axis == "left") {
-            line_series_label += "(◀)";
-            LineSeries_LineSeriesName lineseries_lineseries_name;
-            lineseries_lineseries_name.line_series = line_series;
-            lineseries_lineseries_name.line_series_name = line_series_label;
-            line_series_left_list.append(lineseries_lineseries_name);
-        }
-        else if (which_y_axis == "right") {
-            line_series_label += "(▶)";
-            LineSeries_LineSeriesName lineseries_lineseries_name;
-            lineseries_lineseries_name.line_series = line_series;
-            lineseries_lineseries_name.line_series_name = line_series_label;
-            line_series_right_list.append(lineseries_lineseries_name);
-        }
-    }
-
-    for (int idx = 0; idx < line_series_left_list.size(); idx++) {
-        LineSeries_LineSeriesName lineseries_lineseries_name = line_series_left_list[idx];
-        lineseries_lineseries_name.line_series->setName(lineseries_lineseries_name.line_series_name);
-    }
-
-    for (int idx = 0; idx < line_series_right_list.size(); idx++) {
-        LineSeries_LineSeriesName lineseries_lineseries_name = line_series_right_list[idx];
-        lineseries_lineseries_name.line_series->setName(lineseries_lineseries_name.line_series_name);
-    }
-
-    // Not necessary:
-    // axisX->setMin(data_max_datetime_quantized);
-    // axisX->setMax(data_max_datetime_quantized);
-
-    double delta_seconds = data_min_datetime_quantized.secsTo(data_max_datetime_quantized);
-    int delta_hours = qRound(delta_seconds / (60 * 60));
-    int delta_ticks = 12;
-    QVector<int> factor_list({13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2});
-    for (int idx = 0; idx < factor_list.size(); idx++) {
-        int factor = factor_list[idx];
-        if ((delta_hours % factor) == 0) {
-            delta_ticks = factor;
-            break;
-        }
-    }
-
-    axisX->setTickCount(delta_ticks + 1);
-    axisX->setFormat("hh:mm'\n'MM/dd");
-
-    if (left_y_axis_series_count > 0) {
-        axisY_left->setTickType(QtCharts::QValueAxis::TicksDynamic);
-        axisY_left->setTickAnchor(0);
-        double unit_interval = qPow(10, qFloor(log10(1.025 * data_max_value_left)));
-        QVector<int> unit_interval_scale_list({1, 2, 4, 5, 8});
-        for (int idx = 0; idx < unit_interval_scale_list.size(); idx++) {
-            int unit_interval_scale = unit_interval_scale_list[idx];
-            if ((data_max_value_left / (unit_interval / unit_interval_scale)) >= 4) {
-                unit_interval = unit_interval / unit_interval_scale;
-                break;
-            }
-        }
-        axisY_left->setTickInterval(unit_interval);
-        axisY_left->setRange(0, (1.025 * data_max_value_left));
-
-        QColor pen_color = axisY_left->linePen().color();
-        pen_color.setNamedColor("#ccccff");
-        axisY_left->setLinePenColor(pen_color);
-        axisY_left->setGridLineColor(pen_color);
-        axisY_left->setGridLineVisible(false);
-    }
-
-    if (right_y_axis_series_count >= 0) {
-        axisY_right->setTickType(QtCharts::QValueAxis::TicksDynamic);
-        axisY_right->setTickAnchor(0);
-        double unit_interval = qPow(10, qFloor(log10(1.025 * data_max_value_right)));
-        QVector<int> unit_interval_scale_list({1, 2, 4, 5, 8});
-        for (int idx = 0; idx < unit_interval_scale_list.size(); idx++) {
-            int unit_interval_scale = unit_interval_scale_list[idx];
-            if ((data_max_value_right / (unit_interval / unit_interval_scale)) >= 4) {
-                unit_interval = unit_interval / unit_interval_scale;
-                break;
-            }
-        }
-        axisY_right->setTickInterval(unit_interval);
-        axisY_right->setRange(0, (1.025 * data_max_value_right));
-
-        QColor pen_color = axisY_right->linePen().color();
-        pen_color.setNamedColor("#ffcccc");
-        axisY_right->setLinePenColor(pen_color);
-        axisY_right->setGridLineColor(pen_color);
-        // axisY_right->setGridLineVisible(false);
-    }
-
-    // chart->legend()->setVisible(false);
-    QLegend *legend = chart->legend();
-    // Don't show the "fake" workaround_line_series' marker
-    legend->markers(workaround_line_series)[0]->setVisible(false);
-    legend->setVisible(true);
-    legend->setAlignment(Qt::AlignTop);
-    legend->setContentsMargins(0, 0, 0, 0);
-    legend->layout()->setContentsMargins(0, 0, 0, 0);
-
-    plot_area_box = chart->plotArea();
-    QColor pen_color;
-    pen_color.setNamedColor("lightgray");
-    plot_area_box_item = chartview_scene->addRect(plot_area_box, pen_color);
-
-    has_data = true;
-}
-
-void
-ChartView::resizeEvent ( QResizeEvent *event ) {
-    QtCharts::QChartView::resizeEvent(event);
-    // Otherwise, we'll draw the box before ChartView is sized
-    if (plot_area_box_item) chartview_scene->removeItem(plot_area_box_item);
-    plot_area_box = chart->plotArea();
-    QColor pen_color;
-    pen_color.setNamedColor("lightgray");
-    plot_area_box_item = chartview_scene->addRect(plot_area_box, pen_color);
-}
-
-//ChartView::~ChartView ( ) {
-//}
-
-void
-ChartView::mouseMoveEvent ( QMouseEvent *event ) {
-    if (has_data) {
-        QRectF plotarea_rect = chart->plotArea();
-        if (not plotarea_rect.contains(event->pos()))
-            QToolTip::hideText();
-        else {
-            QString tooltip_text = "";
-
-            QList<QAbstractSeries*> chart_series_list = chart->series();
-            // First series is workaround for datetime axis labeling issue
-            QPointF mouse_move_point_left = chart->mapToValue(event->pos(), chart_series_list[1]);
-            QPointF mouse_move_point_right =
-                chart->mapToValue(event->pos(), chart_series_list[chart_series_list.size()-1]);
-
-            qint64 mouse_move_point_right_x = static_cast<qint64>(mouse_move_point_right.x());
-            // qDebug() << mouse_move_point_right_x;
-            QDateTime mouse_move_datetime = QDateTime().fromMSecsSinceEpoch(mouse_move_point_right_x);
-            tooltip_text += mouse_move_datetime.toString("yyyy-MM-dd HH:mm");
-            tooltip_text += QString("\n") + QString("L: ") + QString::number(mouse_move_point_left.y(), 'f', 2);
-            tooltip_text += QString("   R: ") + QString::number(mouse_move_point_right.y(), 'f', 2);
-
-            QPoint tooltip_pos = event->pos();
-            tooltip_pos.setX(this->pos().x() + tooltip_pos.x()); // + tooltip_pos_offset_x)
-            tooltip_pos.setY(this->pos().y() + tooltip_pos.y()); // + tooltip_pos_offset_y)
-
-            QToolTip::showText(tooltip_pos, tooltip_text, this);
-        }
-    }
-
-}
-
-void
-ChartView::mousePressEvent ( QMouseEvent *event ) {
-    if (has_data) {
-        if (zoom_level == 0) {
-            QRectF plotarea_rect = chart->plotArea();
-            double zoom_area_left =
-                qMax((event->pos().x() - (plotarea_rect.width() / (2 * zoom_factor))), plotarea_rect.left());
-            double zoom_area_top =
-                qMax((event->pos().y() - (plotarea_rect.height() / (2 * zoom_factor))), plotarea_rect.top());
-            double zoom_area_width = plotarea_rect.width() / zoom_factor;
-            double zoom_area_height = plotarea_rect.height() / zoom_factor;
-            if ((zoom_area_left + zoom_area_width) > (plotarea_rect.left() + plotarea_rect.width()))
-                zoom_area_left = (plotarea_rect.left() + plotarea_rect.width()) - zoom_area_width;
-            if ((zoom_area_top + zoom_area_height) > (plotarea_rect.top() + plotarea_rect.height()))
-                zoom_area_top = (plotarea_rect.top() + plotarea_rect.height()) - zoom_area_height;
-            QRectF zoom_rect = QRectF(zoom_area_left, zoom_area_top, zoom_area_width, zoom_area_height);
-            chart->zoomIn(zoom_rect);
-            zoom_level += 1;
-        }
-        else {
-            chart->zoomReset();
-            zoom_level -= 1;
-        }
-    }
-
-}
-
-
-ControlBar::ControlBar ( QWidget *parent ) : QFrame ( parent ) {
-    // Values for relative-to-now begin and end of display period
-    period_duration_hours = Initial_Period_Duration_Hours;
-    period_end_hours_ago = Initial_Period_End_Hours_Ago;
-
-    setMouseTracking(true);
-
-    int slider_minimum_value = 0;
-
-    int period_duration_slider_maximum_value = 999;
-    period_duration_slider_value_span = period_duration_slider_maximum_value - slider_minimum_value;
-
-    int period_end_slider_maximum_value = 1000;
-    period_end_slider_value_span = period_end_slider_maximum_value - slider_minimum_value;
-
-    setContentsMargins(0, 0, 0, 0);
-    setFrameShape(QFrame::StyledPanel);
-    setAutoFillBackground(true);
-    setLineWidth(0);
-    setMaximumHeight(32);
-    // setFrameStyle(QFrame::Plain);
-
-    QHBoxLayout *control_bar_layout = new QHBoxLayout();
-    control_bar_layout->setMargin(0);
-    control_bar_layout->setContentsMargins(0, 0, 0, 0);
-    control_bar_layout->setSpacing(2);
-    control_bar_layout->setAlignment(Qt::AlignCenter);
-
-    previous_pushbutton = new QPushButton("⬆", parent=this);
-    previous_pushbutton->setFixedWidth(56);
-    connect(previous_pushbutton, SIGNAL(clicked()), this, SLOT(emit_previous_signal()));
-    previous_pushbutton->setMouseTracking(true);
-    control_bar_layout->addWidget(previous_pushbutton);
-
-    period_duration_hours_label = new QLabel("24H", parent=this);
-    period_duration_hours_label->setFixedWidth(76);
-    period_duration_hours_label->setAlignment(Qt::AlignCenter);
-    control_bar_layout->addWidget(period_duration_hours_label);
-
-    period_duration_hours_slider = new QSlider(Qt::Horizontal, parent=this);
-    period_duration_hours_slider->setMinimumWidth(360); // 5 pixels per step, 72 steps
-    period_duration_hours_slider->setMinimum(slider_minimum_value);
-    period_duration_hours_slider->setMaximum(period_duration_slider_maximum_value);
-    period_duration_hours_slider->setValue(slider_minimum_value);
-    connect(period_duration_hours_slider, SIGNAL(valueChanged(int)),
-            this, SLOT(on_period_duration_hours_value_change(int)));
-    connect(period_duration_hours_slider, SIGNAL(sliderReleased()), this, SLOT(emit_update_signal()));
-    period_duration_hours_slider->setMouseTracking(true);
-    control_bar_layout->addWidget(period_duration_hours_slider);
-
-    // min = slider_minimum_value, max = period_duration_slider_maximum_value,
-    // value = period_duration_slider_maximum_value, step = 1, size_hint = (0.4, 1))
-
-    duplex_pushbutton = new QPushButton("2", parent=this);
-    connect(duplex_pushbutton, SIGNAL(clicked()), this, SLOT(emit_duplex_signal()));
-    duplex_pushbutton->setFixedWidth(32);
-    duplex_pushbutton->setDown(true);
-    duplex_pushbutton->setMouseTracking(true);
-    control_bar_layout->addWidget(duplex_pushbutton);
-
-    QPushButton *refresh_pushbutton = new QPushButton("Refresh", parent=this);
-    connect(refresh_pushbutton, SIGNAL(clicked()), this, SLOT(emit_update_signal()));
-    refresh_pushbutton->setFixedWidth(104);
-    control_bar_layout->addWidget(refresh_pushbutton);
-
-    simplex_pushbutton = new QPushButton("1", parent=this);
-    connect(simplex_pushbutton, SIGNAL(clicked()), this, SLOT(emit_simplex_signal()));
-    simplex_pushbutton->setFixedWidth(32);
-    simplex_pushbutton->setMouseTracking(true);
-    control_bar_layout->addWidget(simplex_pushbutton);
-
-    period_end_hours_ago_slider = new QSlider(Qt::Horizontal, parent=this);
-    period_end_hours_ago_slider->setMinimumWidth(360); // 5 pixels per step, 72 steps
-    period_end_hours_ago_slider->setMinimum(slider_minimum_value);
-    period_end_hours_ago_slider->setMaximum(period_end_slider_maximum_value);
-    period_end_hours_ago_slider->setValue(period_end_slider_maximum_value);
-    connect(period_end_hours_ago_slider, SIGNAL(valueChanged(int)),
-            this, SLOT(on_period_end_hours_ago_value_change(int)));
-    connect(period_end_hours_ago_slider, SIGNAL(sliderReleased()), this, SLOT(emit_update_signal()));
-    period_end_hours_ago_slider->setMouseTracking(true);
-    control_bar_layout->addWidget(period_end_hours_ago_slider);
-
-    // min = slider_minimum_value, max = period_end_slider_maximum_value,
-    // value = period_end_slider_maximum_value, step = 1, size_hint = (0.4, 1))
-
-    period_end_hours_ago_label = new QLabel("0H ago", parent=this);
-    period_end_hours_ago_label->setFixedWidth(76);
-    period_end_hours_ago_label->setAlignment(Qt::AlignCenter);
-    control_bar_layout->addWidget(period_end_hours_ago_label);
-
-    next_pushbutton = new QPushButton("⬇", parent=this);
-    next_pushbutton->setFixedWidth(56);
-    connect(next_pushbutton, SIGNAL(clicked()), this, SLOT(emit_next_signal()));
-    next_pushbutton->setMouseTracking(true);
-    control_bar_layout->addWidget(next_pushbutton);
-
-    setLayout(control_bar_layout);
-
-    set_period_duration_hours_value(period_duration_hours);
-    set_period_end_hours_ago_value(period_end_hours_ago);
-}
-
-// Public functions (used to synchronize multiple TimeSpanControlBars) ...
-int
-ControlBar::get_period_duration_hours_value ( ) {
-    return period_duration_hours;
-}
-
-void
-ControlBar::set_period_duration_hours_value ( int period_duration_hours_value) {
-    period_duration_hours = period_duration_hours_value;
-    period_duration_hours_label->setText(period_value_display(period_duration_hours));
-//    double slider_value_a = Period_Duration_Hours_Steps.indexOf(period_duration_hours);
-//    double slider_value_b = period_duration_slider_value_span *
-//                             Period_Duration_Hours_Steps.indexOf(period_duration_hours);
-//    double slider_value_c = (period_duration_slider_value_span *
-//            Period_Duration_Hours_Steps.indexOf(period_duration_hours)) /
-//             Period_Duration_Hours_Steps.count();
-    period_duration_hours_slider->setValue
-        (1000 - int(round((period_duration_slider_value_span *
-                           Period_Duration_Hours_Steps.indexOf(period_duration_hours)) /
-                          Period_Duration_Hours_Steps.count())));
-}
-
-int
-ControlBar::get_period_end_hours_ago_value ( ) {
-    return period_end_hours_ago;
-}
-
-void
-ControlBar::set_period_end_hours_ago_value ( int period_end_hours_ago_value ) {
-    period_end_hours_ago = period_end_hours_ago_value;
-    period_end_hours_ago_slider->setValue
-        (1000 - int(round((period_end_slider_value_span *
-                           Period_End_Hours_Ago_Steps.indexOf(period_end_hours_ago)) /
-                          Period_End_Hours_Ago_Steps.count())));
-    period_end_hours_ago_label->setText(period_value_display(period_end_hours_ago) + " ago");
-}
-// ... Public functions  (used to synchronize multiple TimeSpanControlBars)
-
-// Private functions ...
-QString
-ControlBar::period_value_display ( int Period_Value ) {
-    QString period_value_string = "";
-    if (Period_Value >= 24)
-        period_value_string += QString::number(qFloor(Period_Value / 24)) + "D";
-    if (((Period_Value % 24) > 0) or (period_value_string.count() == 0)) {
-        if (period_value_string.count() > 0) period_value_string += " ";
-        period_value_string += QString::number(Period_Value % 24) + "H";
-    }
-    return period_value_string;
-}
-
-void
-ControlBar::on_period_duration_hours_value_change ( int period_duration_slider_value ) {
-    // print (period_duration_slider_value)
-    int period_value_index =
-        int(round((Period_Duration_Hours_Steps.count() *
-                   abs(period_duration_slider_value - 1000)) / period_duration_slider_value_span));
-    period_duration_hours =
-        Period_Duration_Hours_Steps[bound(0, (Period_Duration_Hours_Steps.count() - 1), period_value_index)];
-    period_duration_hours_label->setText(period_value_display(period_duration_hours));
-    // print (period_duration_slider_value, period_value_index, period_duration_hours, period_duration_label.text)
-    // return True
-}
-
-void
-ControlBar::on_period_end_hours_ago_value_change ( int period_end_slider_value ) {
-    int period_end_value_index =
-        int(round((Period_End_Hours_Ago_Steps.count() *
-                   abs(period_end_slider_value - 1000)) / period_end_slider_value_span));
-    period_end_hours_ago =
-        Period_End_Hours_Ago_Steps[bound(0, (Period_End_Hours_Ago_Steps.count() -1), period_end_value_index)];
-    period_end_hours_ago_label->setText(period_value_display(period_end_hours_ago) + " ago");
-    // return True
-}
-
-void
-ControlBar::emit_update_signal ( ) {
-    emit metricsUpdate();
-}
-
-void
-ControlBar::emit_previous_signal ( ) {
-    emit metricsPrevious();
-}
-
-void
-ControlBar::emit_next_signal ( ) {
-    emit metricsNext();
-}
-
-void
-ControlBar::emit_duplex_signal ( ) {
-    if (not duplex_pushbutton->isDown()) {
-        duplex_pushbutton->setDown(true);
-        simplex_pushbutton->setDown(false);
-    }
-    emit metricsDuplex();
-}
-
-void
-ControlBar::emit_simplex_signal ( ) {
-    if (not simplex_pushbutton->isDown()) {
-        duplex_pushbutton->setDown(false);
-        simplex_pushbutton->setDown(true);
-    }
-    emit metricsSimplex();
-}
-
-void
-ControlBar::mouseMoveEvent ( QMouseEvent *event ) {
-    if (rect().contains(event->pos())) {
-        QPoint control_bar_pos = pos();
-
-        QPoint tooltip_pos = event->pos();
-        tooltip_pos.setX(control_bar_pos.x() + tooltip_pos.x());
-        tooltip_pos.setY(control_bar_pos.y() + tooltip_pos.y() + 100);
-
-        if (previous_pushbutton->geometry().contains(event->pos()))
-            QToolTip::showText(tooltip_pos, "Previous graph page");
-        else if (period_duration_hours_slider->geometry().contains(event->pos()))
-            QToolTip::showText(tooltip_pos, "Adjust period of displayed metrics in hours");
-        else if (duplex_pushbutton->geometry().contains(event->pos()))
-            QToolTip::showText(tooltip_pos, "Duplex page (two graphs)");
-        else if (simplex_pushbutton->geometry().contains(event->pos()))
-            QToolTip::showText(tooltip_pos, "Simplex page (one graph)");
-        else if (period_end_hours_ago_slider->geometry().contains(event->pos()))
-            QToolTip::showText(tooltip_pos, "Adjust hours ago of end of displayed metrics period");
-        else if (next_pushbutton->geometry().contains(event->pos()))
-            QToolTip::showText(tooltip_pos, "Next graph page");
-        else QToolTip::hideText();
-    }
-    else QToolTip::hideText();
-}
-// ... Private functions
-
-////ControlBar::~ControlBar ( ) {
-////}
