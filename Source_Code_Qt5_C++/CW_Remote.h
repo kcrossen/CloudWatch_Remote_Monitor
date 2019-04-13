@@ -43,6 +43,10 @@
 #include <aws/monitoring/model/GetMetricStatisticsResult.h>
 #include <aws/monitoring/model/DescribeAlarmHistoryRequest.h>
 #include <aws/monitoring/model/DescribeAlarmHistoryResult.h>
+
+#include <aws/monitoring/model/ListMetricsRequest.h>
+#include <aws/monitoring/model/ListMetricsResult.h>
+
 #include <aws/monitoring/model/Datapoint.h>
 
 #include "ChartView.h"
@@ -170,6 +174,12 @@ public slots:
 
     void
     update_alarms (  );
+
+    void
+    update_alarm_history ( bool Force_Alarm_History_Display );
+
+    void
+    display_alarms ( QString Alarm_History_Text );
 
     void
     update_page_metrics (  );

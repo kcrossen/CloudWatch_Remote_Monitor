@@ -60,7 +60,7 @@ int Initial_Period_Duration_Hours = 24;
 static
 int Initial_Period_End_Hours_Ago = 0;
 static
-bool Automatic_Alarm_History = false;
+bool Automatic_Alarm_History = true;
 
 static
 CW_Remote *CW_Remote_Main_Window;
@@ -428,6 +428,35 @@ Alarm_History ( QJsonArray Alarm_Name_List ) {
 using namespace Aws::Utils::Logging;
 
 int main ( int argc, char* argv[] ) {
+
+//    Aws::SDKOptions options;
+//    Aws::InitAPI(options);
+//    {
+//        Aws::CloudWatch::CloudWatchClient cw;
+//        Aws::CloudWatch::Model::ListMetricsRequest request;
+
+//        request.SetMetricName("CPUUtilization");
+//        request.SetNamespace("AWS/RDS");
+
+//        bool done = false;
+//        bool header = false;
+//        while (!done)
+//        {
+//            auto outcome = cw.ListMetrics(request);
+//            const bool outcome_is_success = outcome.IsSuccess();
+//            const auto outcome_error = outcome.GetError();
+//            if (!outcome.IsSuccess())
+//            {
+//                std::cout << "Failed to list CloudWatch metrics:" <<
+//                    outcome.GetError().GetMessage() << std::endl;
+//                break;
+//            }
+//            done = true;
+//        }
+
+//    }
+//    Aws::ShutdownAPI(options);
+
     QApplication Application(argc, argv);
     // qDebug() << qVersion();
 
@@ -457,7 +486,7 @@ int main ( int argc, char* argv[] ) {
     Graph_Metric_Descriptor_List = CW_Remote_ini["metric_descriptor_list"].toArray();
     Alarm_Name_List = CW_Remote_ini["alarm_name_list"].toArray();
 
-    SDKOptions options;
+    SDKOptions cw_remote_options;
 //    options.loggingOptions.logLevel = Aws::Utils::Logging::LogLevel::Off;
 
 //    options.loggingOptions.logLevel = LogLevel::Off;
@@ -467,8 +496,7 @@ int main ( int argc, char* argv[] ) {
 //        Aws::MakeShared<Aws::Utils::Logging::DefaultLogSystem>(
 //            "RunUnitTests", Aws::Utils::Logging::LogLevel::Off, "aws_sdk_"));
 //    Aws::Utils::Logging::ShutdownAWSLogging();
-    InitAPI(options);
-
+    InitAPI(cw_remote_options);
 
     AWSCredentials credentials;
     credentials.SetAWSAccessKeyId(aws_access_id.toStdString());
@@ -491,7 +519,7 @@ int main ( int argc, char* argv[] ) {
 
     Aws::Utils::Logging::ShutdownAWSLogging();
 
-    ShutdownAPI(options);
+    ShutdownAPI(cw_remote_options);
 
     return return_code;
 }
@@ -585,10 +613,17 @@ CW_Remote_Screen::~CW_Remote_Screen ( ) {
 
 void
 CW_Remote_Screen::update_alarms (  ) {
+    update_alarm_history(true);
+}
+
+void
+CW_Remote_Screen::update_alarm_history ( bool Force_Alarm_History_Display ) {
     QMap<QString, QList<QMap<QString, QString>>> alarms_history = Alarm_History(Alarm_Name_List);
 
     QList<QString> alarm_name_list = alarms_history.uniqueKeys();
     QString alarm_history_text;
+
+    bool alarm_currently_in_alarm_state = false;
 
     for (int key_idx = 0; key_idx < alarm_name_list.size(); key_idx++) {
         QString alarm_name = alarm_name_list[key_idx];
@@ -599,6 +634,11 @@ CW_Remote_Screen::update_alarms (  ) {
             QMap<QString, QString> alarm_detail_map = alarm_detail_list[detail_idx];
             QString alarm_datetime = alarm_detail_map["AlarmDateTime"];
             QString alarm_summary = alarm_detail_map["AlarmSummary"];
+
+            if ((detail_idx == 0) and
+                (alarm_summary == "Alarm updated from OK to ALARM"))
+                alarm_currently_in_alarm_state = true;
+
             QJsonObject alarm_data = QJsonDocument::fromJson(alarm_detail_map["AlarmData"].toUtf8()).object();
             QJsonObject alarm_data_new_state = alarm_data["newState"].toObject();
             QString alarm_data_new_state_reason = alarm_data_new_state["stateReason"].toString();
@@ -625,9 +665,19 @@ CW_Remote_Screen::update_alarms (  ) {
         }
     }
 
+    if (alarm_currently_in_alarm_state or Force_Alarm_History_Display) {
+        if (alarm_currently_in_alarm_state and (not Force_Alarm_History_Display))
+            // Only routine sceduled with alarm currently in alarm state
+            QApplication::beep();
+        display_alarms(alarm_history_text);
+    }
+}
+
+void
+CW_Remote_Screen::display_alarms ( QString Alarm_History_Text ) {
     QMessageBox Alarm_History_MessageBox;
     Alarm_History_MessageBox.setFixedWidth(800);
-    Alarm_History_MessageBox.setText(alarm_history_text);
+    Alarm_History_MessageBox.setText(Alarm_History_Text);
     Alarm_History_MessageBox.exec();
 }
 
@@ -637,8 +687,7 @@ CW_Remote_Screen::timer_update_page_metrics (  ) {
          (Upper_Chartview->zoom_level == 0) and (Lower_Chartview->zoom_level == 0)) or
         ((Visible_Graph_Count == 1) and (Lower_Chartview->zoom_level == 0))) update_page_metrics();
 
-    if (Automatic_Alarm_History)
-        QMap<QString, QList<QMap<QString, QString>>> alarm_history = Alarm_History(Alarm_Name_List);
+    if (Automatic_Alarm_History) update_alarm_history(false);
 }
 
 void
