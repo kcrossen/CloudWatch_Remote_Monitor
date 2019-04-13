@@ -63,6 +63,7 @@ private:
 public slots:
 
 signals:
+    void alarmsUpdate ( );
     void metricsUpdate ( );
     void metricsPrevious ( );
     void metricsNext ( );
@@ -83,6 +84,9 @@ private slots:
 
     void
     on_period_end_hours_ago_value_change ( int period_end_slider_value );
+
+    void
+    emit_alarms_signal ( );
 
     void
     emit_update_signal ( );

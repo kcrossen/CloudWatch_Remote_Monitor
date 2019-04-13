@@ -1,7 +1,7 @@
 #include <QApplication>
 
 // X axis ticks/labels optimize
-// Alarms
+// Automatic adaptive alarms
 // {@@@@@}
 
 
@@ -28,7 +28,7 @@
 //$
 
 
-//$ /Users/Ken/Qt/5.12.2/clang_64/bin/macdeployqt CW_Remote.app
+//$ ~/Qt/5.12.2/clang_64/bin/macdeployqt CW_Remote.app
 
 
 #include "CW_Remote.h"
@@ -60,7 +60,7 @@ int Initial_Period_Duration_Hours = 24;
 static
 int Initial_Period_End_Hours_Ago = 0;
 static
-bool Fetch_Alarm_History = false;
+bool Automatic_Alarm_History = false;
 
 static
 CW_Remote *CW_Remote_Main_Window;
@@ -122,8 +122,6 @@ Get_Metric_Statistics ( int Graph_Metric_Descriptor_Index,
 
     request.SetPeriod(Optimize_DataPoint_Summary_Seconds(Period_Duration_Hours));
 
-    // {@@@@@} This is not adaptive to enum:
-    //            Average, Minimum, Maximum, SampleCount, Sum
     bool request_average = false;
     bool request_maximum = false;
     bool request_minimum = false;
@@ -352,7 +350,7 @@ static
 void
 Describe_Alarm_History ( QString Alarm_Name,
                          QDateTime Period_Begin_UTC, QDateTime Period_End_UTC,
-                         QMap<QString, QStringList> Alarm_History_Results ) {
+                         QMap<QString, QList<QMap<QString, QString>>> *Alarm_History_Results ) {
 
     DescribeAlarmHistoryRequest request;
     request.SetAlarmName(Alarm_Name.toStdString());
@@ -372,32 +370,37 @@ Describe_Alarm_History ( QString Alarm_Name,
     // Aws::String next_token = raw_alarm_history_result.GetNextToken();
     // bool done = next_token.empty();
 
-    Aws::Vector<AlarmHistoryItem> alarm_history_items = raw_alarm_history_result.GetAlarmHistoryItems();
+    Aws::Vector<AlarmHistoryItem> alarm_history_list = raw_alarm_history_result.GetAlarmHistoryItems();
 
-    QStringList alarm_history;
-    for (unsigned long idx = 0; idx < alarm_history_items.size(); idx++) {
-        AlarmHistoryItem history_item = alarm_history_items[idx];
+    QList<QMap<QString, QString>> alarm_history;
+    for (unsigned long idx = 0; idx < alarm_history_list.size(); idx++) {
+        AlarmHistoryItem history_item = alarm_history_list[idx];
+
+        QMap<QString, QString> alarm_history_item;
 
         Aws::String history_item_alarm_name = history_item.GetAlarmName();
-        alarm_history.append(QString::fromUtf8(history_item_alarm_name.data()/*, history_item_alarm_name.size()*/));
+        alarm_history_item["AlarmName"] = QString::fromUtf8(history_item_alarm_name.data()/*, history_item_alarm_name.size()*/);
 
         QDateTime history_item_datetime_utc = QDateTime().fromMSecsSinceEpoch(history_item.GetTimestamp().Millis());
-        alarm_history.append(history_item_datetime_utc.toLocalTime().toString());
+        alarm_history_item["AlarmDateTime"] = history_item_datetime_utc.toLocalTime().toString();
 
         Aws::String history_item_summary = history_item.GetHistorySummary();
-        alarm_history.append(QString::fromUtf8(history_item_summary.data()/*, history_item_summary.size()*/));
+        alarm_history_item["AlarmSummary"] = QString::fromUtf8(history_item_summary.data()/*, history_item_summary.size()*/);
 
         Aws::String history_item_data = history_item.GetHistoryData();
-        alarm_history.append(QString::fromUtf8(history_item_data.data()/*, history_item_data.size()*/));
+        alarm_history_item["AlarmData"] = QString::fromUtf8(history_item_data.data()/*, history_item_data.size()*/);
+
+        alarm_history.append(alarm_history_item);
     }
 
-    Alarm_History_Results[Alarm_Name] = alarm_history;
+    if (alarm_history.size() > 0)
+        (*Alarm_History_Results)[Alarm_Name] = alarm_history;
 }
 
 static
-QMap<QString, QStringList>
+QMap<QString, QList<QMap<QString, QString>>>
 Alarm_History ( QJsonArray Alarm_Name_List ) {
-    QMap<QString, QStringList> alarm_history_results;
+    QMap<QString, QList<QMap<QString, QString>>> alarm_history_results;
     if (Alarm_Name_List.count() == 0) return alarm_history_results;
 
     QDateTime datetime_now_utc = QDateTime::currentDateTimeUtc();
@@ -408,7 +411,7 @@ Alarm_History ( QJsonArray Alarm_Name_List ) {
         QString alarm_name = Alarm_Name_List[idx].toString();
         QFuture<void> future = QtConcurrent::run(Describe_Alarm_History, alarm_name,
                                                  datetime_yesterday_utc, datetime_now_utc,
-                                                 alarm_history_results);
+                                                 &alarm_history_results);
         future_list.append(future);
     }
 
@@ -529,6 +532,7 @@ CW_Remote_Screen::CW_Remote_Screen ( QWidget *parent ) : QWidget ( parent ) {
     Upper_Chartview = new ChartView();
 
     Control_Bar = new ControlBar(Initial_Period_Duration_Hours, Initial_Period_End_Hours_Ago);
+    connect(Control_Bar, SIGNAL(alarmsUpdate()), this, SLOT(update_alarms()));
     connect(Control_Bar, SIGNAL(metricsUpdate()), this, SLOT(update_page_metrics()));
     connect(Control_Bar, SIGNAL(metricsPrevious()), this, SLOT(previous_page_metrics()));
     connect(Control_Bar, SIGNAL(metricsNext()), this, SLOT(next_page_metrics()));
@@ -580,13 +584,61 @@ CW_Remote_Screen::~CW_Remote_Screen ( ) {
 }
 
 void
+CW_Remote_Screen::update_alarms (  ) {
+    QMap<QString, QList<QMap<QString, QString>>> alarms_history = Alarm_History(Alarm_Name_List);
+
+    QList<QString> alarm_name_list = alarms_history.uniqueKeys();
+    QString alarm_history_text;
+
+    for (int key_idx = 0; key_idx < alarm_name_list.size(); key_idx++) {
+        QString alarm_name = alarm_name_list[key_idx];
+        if (alarm_history_text.size() > 0) alarm_history_text += "\n\n";
+        alarm_history_text += alarm_name + ":";
+        QList<QMap<QString, QString>> alarm_detail_list = alarms_history.value(alarm_name);
+        for (int detail_idx = 0; detail_idx < alarm_detail_list.size(); detail_idx++) {
+            QMap<QString, QString> alarm_detail_map = alarm_detail_list[detail_idx];
+            QString alarm_datetime = alarm_detail_map["AlarmDateTime"];
+            QString alarm_summary = alarm_detail_map["AlarmSummary"];
+            QJsonObject alarm_data = QJsonDocument::fromJson(alarm_detail_map["AlarmData"].toUtf8()).object();
+            QJsonObject alarm_data_new_state = alarm_data["newState"].toObject();
+            QString alarm_data_new_state_reason = alarm_data_new_state["stateReason"].toString();
+            int ch_idx = 0;
+            ch_idx = alarm_data_new_state_reason.indexOf("[");
+            alarm_data_new_state_reason.remove(0, (ch_idx + 1));
+            ch_idx = alarm_data_new_state_reason.indexOf(".");
+            int ch_end_idx = alarm_data_new_state_reason.indexOf("]");
+            alarm_data_new_state_reason.remove((ch_idx + 2), (ch_end_idx - (ch_idx + 1)));
+            alarm_data_new_state_reason.replace(" was not greater than the threshold (", " < ");
+            alarm_data_new_state_reason.replace(" was greater than the threshold (", " > ");
+            alarm_data_new_state_reason.replace(").", "");
+            // qDebug() << alarm_data_new_state_reason;
+            if (alarm_summary == "Alarm updated from OK to ALARM")
+                alarm_history_text +=
+                    "\n  " + alarm_datetime + ": ALARM\n    (value " +
+                    alarm_data_new_state_reason + " threshold)";
+            else if (alarm_summary == "Alarm updated from ALARM to OK")
+                alarm_history_text +=
+                    "\n  " + alarm_datetime + ": OK\n    (value " +
+                    alarm_data_new_state_reason + " threshold)";
+            else
+                alarm_history_text += "\n  " + alarm_datetime + ":\n    " + alarm_summary;
+        }
+    }
+
+    QMessageBox Alarm_History_MessageBox;
+    Alarm_History_MessageBox.setFixedWidth(800);
+    Alarm_History_MessageBox.setText(alarm_history_text);
+    Alarm_History_MessageBox.exec();
+}
+
+void
 CW_Remote_Screen::timer_update_page_metrics (  ) {
     if (((Visible_Graph_Count == 2) and
          (Upper_Chartview->zoom_level == 0) and (Lower_Chartview->zoom_level == 0)) or
         ((Visible_Graph_Count == 1) and (Lower_Chartview->zoom_level == 0))) update_page_metrics();
 
-    if (Fetch_Alarm_History)
-        QMap<QString, QStringList> alarm_history = Alarm_History(Alarm_Name_List);
+    if (Automatic_Alarm_History)
+        QMap<QString, QList<QMap<QString, QString>>> alarm_history = Alarm_History(Alarm_Name_List);
 }
 
 void

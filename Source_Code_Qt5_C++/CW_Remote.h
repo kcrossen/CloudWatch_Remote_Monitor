@@ -169,6 +169,9 @@ public slots:
     timer_update_page_metrics (  );
 
     void
+    update_alarms (  );
+
+    void
     update_page_metrics (  );
 
     void

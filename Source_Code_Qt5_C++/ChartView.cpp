@@ -73,6 +73,10 @@ ChartView::setChartData ( const QVector<Metric_Statistics_Descriptor> Chart_Metr
         chart->addAxis(axisY_right, Qt::AlignRight);
     }
 
+    // {@@@@@} This is not adaptive to enum:
+    //            Average, Minimum, Maximum, SampleCount, Sum
+    // Should be able to plot multiple line series from same dataset.
+    // For example: Average, Minimum, Maximum on same plot
     QList<Metric_Statistics_Datapoint> datapoints =
         Chart_Metric_Statistics_List[0].Datapoints_Maximum_List;
 

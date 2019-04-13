@@ -37,13 +37,13 @@ ControlBar::ControlBar ( int Initial_Period_Duration_Hours,
     control_bar_layout->setAlignment(Qt::AlignCenter);
 
     previous_pushbutton = new QPushButton("⬆", parent=this);
-    previous_pushbutton->setFixedWidth(56);
+    previous_pushbutton->setFixedWidth(64);
     connect(previous_pushbutton, SIGNAL(clicked()), this, SLOT(emit_previous_signal()));
     previous_pushbutton->setMouseTracking(true);
     control_bar_layout->addWidget(previous_pushbutton);
 
     period_duration_hours_label = new QLabel("24H", parent=this);
-    period_duration_hours_label->setFixedWidth(76);
+    period_duration_hours_label->setFixedWidth(80);
     period_duration_hours_label->setAlignment(Qt::AlignCenter);
     control_bar_layout->addWidget(period_duration_hours_label);
 
@@ -68,9 +68,14 @@ ControlBar::ControlBar ( int Initial_Period_Duration_Hours,
     duplex_pushbutton->setMouseTracking(true);
     control_bar_layout->addWidget(duplex_pushbutton);
 
+    QPushButton *alarms_pushbutton = new QPushButton("Alarms", parent=this);
+    connect(alarms_pushbutton, SIGNAL(clicked()), this, SLOT(emit_alarms_signal()));
+    alarms_pushbutton->setFixedWidth(80);
+    control_bar_layout->addWidget(alarms_pushbutton);
+
     QPushButton *refresh_pushbutton = new QPushButton("Refresh", parent=this);
     connect(refresh_pushbutton, SIGNAL(clicked()), this, SLOT(emit_update_signal()));
-    refresh_pushbutton->setFixedWidth(104);
+    refresh_pushbutton->setFixedWidth(80);
     control_bar_layout->addWidget(refresh_pushbutton);
 
     simplex_pushbutton = new QPushButton("1", parent=this);
@@ -94,12 +99,12 @@ ControlBar::ControlBar ( int Initial_Period_Duration_Hours,
     // value = period_end_slider_maximum_value, step = 1, size_hint = (0.4, 1))
 
     period_end_hours_ago_label = new QLabel("0H ago", parent=this);
-    period_end_hours_ago_label->setFixedWidth(76);
+    period_end_hours_ago_label->setFixedWidth(80);
     period_end_hours_ago_label->setAlignment(Qt::AlignCenter);
     control_bar_layout->addWidget(period_end_hours_ago_label);
 
     next_pushbutton = new QPushButton("⬇", parent=this);
-    next_pushbutton->setFixedWidth(56);
+    next_pushbutton->setFixedWidth(64);
     connect(next_pushbutton, SIGNAL(clicked()), this, SLOT(emit_next_signal()));
     next_pushbutton->setMouseTracking(true);
     control_bar_layout->addWidget(next_pushbutton);
@@ -186,6 +191,11 @@ ControlBar::on_period_end_hours_ago_value_change ( int period_end_slider_value )
 }
 
 void
+ControlBar::emit_alarms_signal ( ) {
+    emit alarmsUpdate();
+}
+
+void
 ControlBar::emit_update_signal ( ) {
     emit metricsUpdate();
 }
@@ -226,6 +236,13 @@ ControlBar::mouseMoveEvent ( QMouseEvent *event ) {
         QPoint tooltip_pos = event->pos();
         tooltip_pos.setX(control_bar_pos.x() + tooltip_pos.x());
         tooltip_pos.setY(control_bar_pos.y() + tooltip_pos.y() + 100);
+
+        // qDebug() << "previous_pushbutton" << previous_pushbutton->geometry().width();
+        // qDebug() << "period_duration_hours_slider" << period_duration_hours_slider->geometry().width();
+        // qDebug() << "duplex_pushbutton" << duplex_pushbutton->geometry().width();
+        // qDebug() << "simplex_pushbutton" << simplex_pushbutton->geometry().width();
+        // qDebug() << "period_end_hours_ago_slider" << period_end_hours_ago_slider->geometry().width();
+        // qDebug() << "next_pushbutton" << next_pushbutton->geometry().width();
 
         if (previous_pushbutton->geometry().contains(event->pos()))
             QToolTip::showText(tooltip_pos, "Previous graph page");
