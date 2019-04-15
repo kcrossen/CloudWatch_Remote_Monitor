@@ -17,7 +17,8 @@ HEADERS += \
     json_helpers.h \
     curl.h \
     qcustomplot.h \
-    CustomPlot.h
+    CustomPlot.h \
+    CW_Remote_Copyright.h
 
 SOURCES += \
     CW_Remote.cpp \
