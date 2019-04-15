@@ -454,7 +454,7 @@ Describe_Alarm_History ( QString Alarm_Name,
     Aws::Vector<AlarmHistoryItem> alarm_history_list = raw_alarm_history_result.GetAlarmHistoryItems();
 
     QList<QMap<QString, QString>> alarm_history;
-    for (unsigned long idx = 0; idx < alarm_history_list.size(); idx++) {
+    for (unsigned long idx = 0; idx < qMin(alarm_history_list.size(), static_cast<unsigned long>(4)); idx++) {
         AlarmHistoryItem history_item = alarm_history_list[idx];
 
         QMap<QString, QString> alarm_history_item;
