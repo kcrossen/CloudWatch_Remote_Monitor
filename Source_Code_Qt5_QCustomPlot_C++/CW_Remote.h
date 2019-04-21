@@ -52,6 +52,7 @@
 #include "ChartView.h"
 #include "CustomPlot.h"
 #include "ControlBar.h"
+#include "AlarmReport.h"
 
 static
 QMap<QString, Aws::CloudWatch::Model::Statistic> CloudWatch_Statistics
@@ -169,6 +170,10 @@ private:
     // ChartView *Lower_Chartview;
     CustomPlot *Lower_CustomPlot;
 
+    AlarmReport *Alarm_Report;
+    QDateTime previous_alarm_report_datatime;
+    bool alarms_acknowledged;
+
     QTimer *timer;
 
 protected:
@@ -187,6 +192,12 @@ public slots:
     display_alarms ( QString Alarm_History_Text );
 
     void
+    alarm_report_acknowledged ( );
+
+    void
+    alarm_report_dismissed ( );
+
+    void
     update_page_metrics (  );
 
     void
@@ -199,7 +210,7 @@ public slots:
     duplex_metrics (  );
 
     void
-    simplex_metrics (  );
+    simplex_metrics ( bool Force_Simplex = false );
 
     void
     set_main_window_title (  );

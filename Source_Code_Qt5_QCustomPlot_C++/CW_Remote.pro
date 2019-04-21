@@ -11,22 +11,22 @@ TEMPLATE = app
 
 HEADERS += \
     CW_Remote.h \
-    ChartView.h \
     ControlBar.h \
     AWS_Metrics.h \
     json_helpers.h \
     curl.h \
     qcustomplot.h \
     CustomPlot.h \
-    CW_Remote_Copyright.h
+    CW_Remote_Copyright.h \
+    AlarmReport.h
 
 SOURCES += \
     CW_Remote.cpp \
-    ChartView.cpp \
     ControlBar.cpp \
     json_helpers.cpp \
     qcustomplot.cpp \
-    CustomPlot.cpp
+    CustomPlot.cpp \
+    AlarmReport.cpp
 
 macx:LIBS += -framework CoreFoundation
 

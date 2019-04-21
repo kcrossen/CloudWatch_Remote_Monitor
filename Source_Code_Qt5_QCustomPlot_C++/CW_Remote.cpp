@@ -1,9 +1,14 @@
 #include <QApplication>
 
+// Keep track of already received alarms and individual alarm states.
+// Alarms vs warnings
+// Support two graph lines from same data fetch.
+// {@@@@@}
+
+// Done:
 // X axis ticks/labels optimize
 // Automatic adaptive alarms
 // Click to expand only datetime axis
-// {@@@@@}
 
 
 //AWS C++ SDK build from source, unpack, cd to that directory, then:
@@ -28,7 +33,12 @@
 //    /usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1252.0.0)
 //$
 
-
+// In Qt Creator, from the "Build" menu:
+//     "Run qmake",
+//     "Clean Project 'CW_Remote'",
+//     "Rebuild Project 'CW_Remote'",
+//     "Clean Project 'CW_Remote'"
+//$ cd <release build directory>
 //$ ~/Qt/5.12.2/clang_64/bin/macdeployqt CW_Remote.app
 
 /****************************************************************************
@@ -234,22 +244,25 @@ Get_Metric_Statistics ( int Graph_Metric_Descriptor_Index,
 
     Aws::Vector<Datapoint> raw_metric_datapoints =
         raw_metric_statistics_result.GetDatapoints();
+    int raw_metric_datapoints_count = static_cast<int>(raw_metric_datapoints.size());
 
     // Adaptive to enum: Average, Minimum, Maximum, SampleCount, Sum ...
-    QList<Metric_Statistics_Datapoint> datapoints_average_list;
-    Metric_Statistics_Datapoint datapoint_average;
-
-    QList<Metric_Statistics_Datapoint> datapoints_maximum_list;
-    Metric_Statistics_Datapoint datapoint_maximum;
-
-    QList<Metric_Statistics_Datapoint> datapoints_minimum_list;
-    Metric_Statistics_Datapoint datapoint_minimum;
-
-    QList<Metric_Statistics_Datapoint> datapoints_samplecount_list;
-    Metric_Statistics_Datapoint datapoint_samplecount;
-
-    QList<Metric_Statistics_Datapoint> datapoints_sum_list;
-    Metric_Statistics_Datapoint datapoint_sum;
+    QVector<double> *datapoint_datetime_list = new QVector<double>(raw_metric_datapoints_count);
+    QVector<double> *datapoint_average_value_list = nullptr;
+    QVector<double> *datapoint_maximum_value_list = nullptr;
+    QVector<double> *datapoint_minimum_value_list = nullptr;
+    QVector<double> *datapoint_samplecount_value_list = nullptr;
+    QVector<double> *datapoint_sum_value_list = nullptr;
+    if (request_average)
+        datapoint_average_value_list = new QVector<double>(raw_metric_datapoints_count);
+    if (request_maximum)
+        datapoint_maximum_value_list = new QVector<double>(raw_metric_datapoints_count);
+    if (request_minimum)
+        datapoint_minimum_value_list = new QVector<double>(raw_metric_datapoints_count);
+    if (request_samplecount)
+        datapoint_samplecount_value_list = new QVector<double>(raw_metric_datapoints_count);
+    if (request_sum)
+        datapoint_sum_value_list = new QVector<double>(raw_metric_datapoints_count);
     // ... Adaptive to enum: Average, Minimum, Maximum, SampleCount, Sum
 
     double y_factor = 1;
@@ -258,66 +271,42 @@ Get_Metric_Statistics ( int Graph_Metric_Descriptor_Index,
 
     get_json_string_value(metric_descr, "YFactor", "");
 
-    for (unsigned long idx = 0; idx < raw_metric_datapoints.size(); idx++) {
-        QDateTime datapoint_datetime =
-            QDateTime().fromMSecsSinceEpoch(raw_metric_datapoints[idx].GetTimestamp().Millis()).addSecs(period_local_offset_seconds);
+    for (int idx = 0; idx < raw_metric_datapoints_count; idx++) {
+        (*datapoint_datetime_list)[idx] =
+            (raw_metric_datapoints[static_cast<unsigned long>(idx)].GetTimestamp().Millis() / 1000) + period_local_offset_seconds;
         // Adaptive to enum: Average, Minimum, Maximum, SampleCount, Sum ...
-        if (request_average) {
-            datapoint_average.datapoint_datetime = datapoint_datetime;
-            datapoint_average.datapoint_value = y_factor * raw_metric_datapoints[idx].GetAverage();
-            datapoints_average_list.append(datapoint_average);
-        }
+        if (request_average)
+            (*datapoint_average_value_list)[idx] =
+                y_factor * raw_metric_datapoints[static_cast<unsigned long>(idx)].GetAverage();
 
-        if (request_maximum) {
-            datapoint_maximum.datapoint_datetime = datapoint_datetime;
-            datapoint_maximum.datapoint_value = y_factor * raw_metric_datapoints[idx].GetMaximum();
-            datapoints_maximum_list.append(datapoint_maximum);
-        }
+        if (request_maximum)
+            (*datapoint_maximum_value_list)[idx] =
+                y_factor * raw_metric_datapoints[static_cast<unsigned long>(idx)].GetMaximum();
 
-        if (request_minimum) {
-            datapoint_minimum.datapoint_datetime = datapoint_datetime;
-            datapoint_minimum.datapoint_value = y_factor * raw_metric_datapoints[idx].GetMinimum();
-            datapoints_minimum_list.append(datapoint_minimum);
-        }
+        if (request_minimum)
+            (*datapoint_minimum_value_list)[idx] =
+                y_factor * raw_metric_datapoints[static_cast<unsigned long>(idx)].GetMinimum();
 
-        if (request_samplecount) {
-            datapoint_samplecount.datapoint_datetime = datapoint_datetime;
-            datapoint_samplecount.datapoint_value = y_factor * raw_metric_datapoints[idx].GetSampleCount();
-            datapoints_samplecount_list.append(datapoint_samplecount);
-        }
+        if (request_samplecount)
+            (*datapoint_samplecount_value_list)[idx] =
+                y_factor * raw_metric_datapoints[static_cast<unsigned long>(idx)].GetSampleCount();
 
-        if (request_sum) {
-            datapoint_sum.datapoint_datetime = datapoint_datetime;
-            datapoint_sum.datapoint_value = y_factor * raw_metric_datapoints[idx].GetSum();
-            datapoints_sum_list.append(datapoint_sum);
-        }
+        if (request_sum)
+            (*datapoint_sum_value_list)[idx] =
+                y_factor * raw_metric_datapoints[static_cast<unsigned long>(idx)].GetSum();
         // ... Adaptive to enum: Average, Minimum, Maximum, SampleCount, Sum
     }
 
     Metric_Statistics_Descriptor metric_statistics;
     metric_statistics.Metric_Descriptor = metric_descr;
 
-    // Adaptive to enum: Average, Minimum, Maximum, SampleCount, Sum ...
-    if (request_average) {
-        std::sort(datapoints_average_list.begin(), datapoints_average_list.end(), Metric_Statistics_Datapoint_Compare());
-        metric_statistics.Datapoints_Average_List = datapoints_average_list;
-    }
-    if (request_maximum) {
-        std::sort(datapoints_maximum_list.begin(), datapoints_maximum_list.end(), Metric_Statistics_Datapoint_Compare());
-        metric_statistics.Datapoints_Maximum_List = datapoints_maximum_list;
-    }
-    if (request_minimum) {
-        std::sort(datapoints_minimum_list.begin(), datapoints_minimum_list.end(), Metric_Statistics_Datapoint_Compare());
-        metric_statistics.Datapoints_Minimum_List = datapoints_minimum_list;
-    }
-    if (request_samplecount) {
-        std::sort(datapoints_samplecount_list.begin(), datapoints_samplecount_list.end(), Metric_Statistics_Datapoint_Compare());
-        metric_statistics.Datapoints_SampleCount_List = datapoints_samplecount_list;
-    }
-    if (request_sum) {
-        std::sort(datapoints_sum_list.begin(), datapoints_sum_list.end(), Metric_Statistics_Datapoint_Compare());
-        metric_statistics.Datapoints_Sum_List = datapoints_sum_list;
-    }
+    metric_statistics.Datapoints_DateTime_List = datapoint_datetime_list;
+    // Adaptive to enum: Average, Maximum, Minimum, SampleCount, Sum ...
+    metric_statistics.Datapoints_Average_List = datapoint_average_value_list;
+    metric_statistics.Datapoints_Maximum_List = datapoint_maximum_value_list;
+    metric_statistics.Datapoints_Minimum_List = datapoint_minimum_value_list;
+    metric_statistics.Datapoints_SampleCount_List = datapoint_samplecount_value_list;
+    metric_statistics.Datapoints_Sum_List = datapoint_sum_value_list;
     // ... Adaptive to enum: Average, Minimum, Maximum, SampleCount, Sum
 
     Graph_Metric_Statistics->replace(Metric_Descriptor_Index, metric_statistics);
@@ -460,7 +449,7 @@ Describe_Alarm_History ( QString Alarm_Name,
     Aws::Vector<AlarmHistoryItem> alarm_history_list = raw_alarm_history_result.GetAlarmHistoryItems();
 
     QList<QMap<QString, QString>> alarm_history;
-    for (unsigned long idx = 0; idx < qMin(alarm_history_list.size(), static_cast<unsigned long>(4)); idx++) {
+    for (unsigned long idx = 0; idx < alarm_history_list.size(); idx++) {
         AlarmHistoryItem history_item = alarm_history_list[idx];
 
         QMap<QString, QString> alarm_history_item;
@@ -488,20 +477,18 @@ Describe_Alarm_History ( QString Alarm_Name,
 
 static
 QMap<QString, QList<QMap<QString, QString>>>
-Alarm_History ( QJsonArray Alarm_Name_List ) {
+Alarm_History ( QJsonArray Alarm_Name_List,
+                QDateTime Period_Begin_UTC, QDateTime Period_End_UTC ) {
     QMap<QString, QList<QMap<QString, QString>>> alarm_history_results;
     if (Alarm_Name_List.count() == 0) return alarm_history_results;
 
     bool alarm_success = true;
 
-    QDateTime datetime_now_utc = QDateTime::currentDateTimeUtc();
-    QDateTime datetime_yesterday_utc = datetime_now_utc.addSecs(-(24 * 60 * 60));
-
     QVector<QFuture<bool>> future_list;
     for (int idx = 0; idx < Alarm_Name_List.count(); idx++) {
         QString alarm_name = Alarm_Name_List[idx].toString();
         QFuture<bool> future = QtConcurrent::run(Describe_Alarm_History, alarm_name,
-                                                 datetime_yesterday_utc, datetime_now_utc,
+                                                 Period_Begin_UTC, Period_End_UTC,
                                                  &alarm_history_results);
         future_list.append(future);
     }
@@ -666,7 +653,9 @@ CW_Remote_Screen::CW_Remote_Screen ( QWidget *parent ) : QWidget ( parent ) {
     empty_label = new QLabel("");
     empty_label->setMaximumHeight(1);
 
-    Control_Bar = new ControlBar(Initial_Period_Duration_Hours, Initial_Period_End_Hours_Ago);
+    Control_Bar = new ControlBar(Initial_Period_Duration_Hours,
+                                 Initial_Period_End_Hours_Ago,
+                                 Visible_Graph_Count);
     connect(Control_Bar, SIGNAL(alarmsUpdate()), this, SLOT(update_alarms()));
     connect(Control_Bar, SIGNAL(metricsUpdate()), this, SLOT(update_page_metrics()));
     connect(Control_Bar, SIGNAL(metricsPrevious()), this, SLOT(previous_page_metrics()));
@@ -680,31 +669,32 @@ CW_Remote_Screen::CW_Remote_Screen ( QWidget *parent ) : QWidget ( parent ) {
     QDateTime datetime_now_utc = QDateTime::currentDateTimeUtc();
     QDateTime period_end_utc = datetime_now_utc.addSecs(-(Period_End_Hours_Ago * (60 * 60)));
 
-    // QVector<Metric_Statistics_Descriptor> upper_graph_metric_statistics =
-    //     Get_Graph_Metric_Statistics((Graph_Offset + 0), period_end_utc, Period_Duration_Hours);
+    if (Visible_Graph_Count == 2) {
+        QVector<QVector<Metric_Statistics_Descriptor>> page_graph_metric_statistics =
+            Get_Page_Metric_Statistics ( QVector<int>( { (Graph_Offset + 0), (Graph_Offset + 1) } ),
+                                         period_end_utc, Period_Duration_Hours );
 
-    // QVector<Metric_Statistics_Descriptor> lower_graph_metric_statistics =
-    //     Get_Graph_Metric_Statistics((Graph_Offset + 1), period_end_utc, Period_Duration_Hours);
+        if (page_graph_metric_statistics.size() == 2) {
+            QVector<Metric_Statistics_Descriptor> upper_graph_metric_statistics = page_graph_metric_statistics[0];
+            QVector<Metric_Statistics_Descriptor> lower_graph_metric_statistics = page_graph_metric_statistics[1];
 
-    QVector<QVector<Metric_Statistics_Descriptor>> page_graph_metric_statistics =
-        Get_Page_Metric_Statistics ( QVector<int>( { (Graph_Offset + 0), (Graph_Offset + 1) } ),
-                                     period_end_utc, Period_Duration_Hours );
-
-    if (page_graph_metric_statistics.size() == 2) {
-        QVector<Metric_Statistics_Descriptor> upper_graph_metric_statistics = page_graph_metric_statistics[0];
-        QVector<Metric_Statistics_Descriptor> lower_graph_metric_statistics = page_graph_metric_statistics[1];
-
-        // Upper_Chartview->setChartData(upper_graph_metric_statistics);
-        Upper_CustomPlot = new CustomPlot(upper_graph_metric_statistics);
-        // Lower_Chartview->setChartData(lower_graph_metric_statistics);
-        Lower_CustomPlot = new CustomPlot(lower_graph_metric_statistics);
+            // Upper_Chartview->setChartData(upper_graph_metric_statistics);
+            Upper_CustomPlot = new CustomPlot(upper_graph_metric_statistics);
+            // Lower_Chartview->setChartData(lower_graph_metric_statistics);
+            Lower_CustomPlot = new CustomPlot(lower_graph_metric_statistics);
+        }
     }
     else if (Visible_Graph_Count == 1) {
         QVector<Metric_Statistics_Descriptor> lower_graph_metric_statistics =
             Get_Graph_Metric_Statistics((Graph_Offset + 0), period_end_utc, Period_Duration_Hours);
-        if (lower_graph_metric_statistics.size() >= 1)
+        if (lower_graph_metric_statistics.size() >= 1) {
+            // Must initialize both graph widgets potentially on page, ...
+            // ... initialize both with same dataset.
+            // Upper_Chartview->setChartData(upper_graph_metric_statistics);
+            Upper_CustomPlot = new CustomPlot(lower_graph_metric_statistics);
             // Lower_Chartview->setChartData(lower_graph_metric_statistics);
-            Lower_CustomPlot->setCustomPlotData(lower_graph_metric_statistics);
+            Lower_CustomPlot = new CustomPlot(lower_graph_metric_statistics);
+        }
     }
 
     QVBoxLayout *main_window_layout = new QVBoxLayout();
@@ -722,6 +712,12 @@ CW_Remote_Screen::CW_Remote_Screen ( QWidget *parent ) : QWidget ( parent ) {
 
     set_main_window_title();
 
+    Alarm_Report = new AlarmReport(this);
+    connect(Alarm_Report, SIGNAL(alarmReportAcknowledged()), this, SLOT(alarm_report_acknowledged()));
+    connect(Alarm_Report, SIGNAL(alarmReportDismissed()), this, SLOT(alarm_report_dismissed()));
+    Alarm_Report->setVisible(false);
+    alarms_acknowledged = false;
+
     setAttribute(Qt::WA_AlwaysShowToolTips);
     setMouseTracking(true);
 
@@ -729,6 +725,8 @@ CW_Remote_Screen::CW_Remote_Screen ( QWidget *parent ) : QWidget ( parent ) {
     connect(timer, SIGNAL(timeout()), this, SLOT(timer_update_page_metrics()));
     // Default 60 seconds as milliseconds
     timer->start(Initial_Refresh_Interval_Seconds * 1000);
+
+    if (Visible_Graph_Count == 1) simplex_metrics(true);
 }
 
 CW_Remote_Screen::~CW_Remote_Screen ( ) {
@@ -741,7 +739,16 @@ CW_Remote_Screen::update_alarms (  ) {
 
 void
 CW_Remote_Screen::update_alarm_history ( bool Force_Alarm_History_Display ) {
-    QMap<QString, QList<QMap<QString, QString>>> alarms_history = Alarm_History(Alarm_Name_List);
+    QDateTime datetime_now_utc = QDateTime::currentDateTimeUtc();
+    QDateTime datetime_before_utc = datetime_now_utc.addSecs(-(24 * 60 * 60));
+
+    if (alarms_acknowledged and (not Force_Alarm_History_Display))
+        datetime_before_utc = previous_alarm_report_datatime;
+
+    QMap<QString, QList<QMap<QString, QString>>> alarms_history =
+        Alarm_History(Alarm_Name_List, datetime_before_utc, datetime_now_utc);
+
+    previous_alarm_report_datatime = datetime_now_utc;
 
     if (alarms_history.size() == 0) return;
 
@@ -752,17 +759,20 @@ CW_Remote_Screen::update_alarm_history ( bool Force_Alarm_History_Display ) {
 
     for (int key_idx = 0; key_idx < alarm_name_list.size(); key_idx++) {
         QString alarm_name = alarm_name_list[key_idx];
-        if (alarm_history_text.size() > 0) alarm_history_text += "\n\n";
-        alarm_history_text += alarm_name + ":";
+        if (alarm_history_text.size() > 0) alarm_history_text += "<br/><br/>";
         QList<QMap<QString, QString>> alarm_detail_list = alarms_history.value(alarm_name);
-        for (int detail_idx = 0; detail_idx < alarm_detail_list.size(); detail_idx++) {
+        for (int detail_idx = 0; detail_idx < qMin(alarm_detail_list.size(), 2); detail_idx++) {
             QMap<QString, QString> alarm_detail_map = alarm_detail_list[detail_idx];
             QString alarm_datetime = alarm_detail_map["AlarmDateTime"];
             QString alarm_summary = alarm_detail_map["AlarmSummary"];
 
-            if ((detail_idx == 0) and
-                (alarm_summary == "Alarm updated from OK to ALARM"))
-                alarm_currently_in_alarm_state = true;
+            if (detail_idx == 0) {
+                if (alarm_summary == "Alarm updated from OK to ALARM") {
+                    alarm_currently_in_alarm_state = true;
+                    alarm_history_text += "<font color=\"Red\">" + alarm_name + "</font>:";
+                }
+                else alarm_history_text += alarm_name + ":";
+            }
 
             QJsonObject alarm_data = QJsonDocument::fromJson(alarm_detail_map["AlarmData"].toUtf8()).object();
             QJsonObject alarm_data_new_state = alarm_data["newState"].toObject();
@@ -773,20 +783,27 @@ CW_Remote_Screen::update_alarm_history ( bool Force_Alarm_History_Display ) {
             ch_idx = alarm_data_new_state_reason.indexOf(".");
             int ch_end_idx = alarm_data_new_state_reason.indexOf("]");
             alarm_data_new_state_reason.remove((ch_idx + 2), (ch_end_idx - (ch_idx + 1)));
-            alarm_data_new_state_reason.replace(" was not greater than the threshold (", " < ");
-            alarm_data_new_state_reason.replace(" was greater than the threshold (", " > ");
+            alarm_data_new_state_reason.replace(" was not greater than the threshold (", " LT ");
+            alarm_data_new_state_reason.replace(" was greater than the threshold (", " GT ");
             alarm_data_new_state_reason.replace(").", "");
             // qDebug() << alarm_data_new_state_reason;
-            if (alarm_summary == "Alarm updated from OK to ALARM")
-                alarm_history_text +=
-                    "\n  " + alarm_datetime + ": ALARM\n    (value " +
-                    alarm_data_new_state_reason + " threshold)";
+             if (alarm_summary == "Alarm updated from OK to ALARM") {
+                if (detail_idx == 0)
+                    alarm_history_text +=
+                        "<br/>&nbsp;&nbsp;&nbsp;<b><font color=\"Red\">ALARM</font></b> " +
+                        alarm_datetime + " (value " +
+                        alarm_data_new_state_reason + " threshold)";
+                else
+                    alarm_history_text +=
+                        "<br/>&nbsp;&nbsp;&nbsp;<b>ALARM</b> " + alarm_datetime + " (value " +
+                        alarm_data_new_state_reason + " threshold)";
+            }
             else if (alarm_summary == "Alarm updated from ALARM to OK")
                 alarm_history_text +=
-                    "\n  " + alarm_datetime + ": OK\n    (value " +
+                    "<br/>&nbsp;&nbsp;&nbsp;<b>OK</b> " + alarm_datetime + " (value " +
                     alarm_data_new_state_reason + " threshold)";
             else
-                alarm_history_text += "\n  " + alarm_datetime + ":\n    " + alarm_summary;
+                alarm_history_text += "<br/>&nbsp;&nbsp;&nbsp;" + alarm_datetime + ":<br/>    " + alarm_summary;
         }
     }
 
@@ -800,10 +817,26 @@ CW_Remote_Screen::update_alarm_history ( bool Force_Alarm_History_Display ) {
 
 void
 CW_Remote_Screen::display_alarms ( QString Alarm_History_Text ) {
-    QMessageBox Alarm_History_MessageBox;
-    Alarm_History_MessageBox.setFixedWidth(800);
-    Alarm_History_MessageBox.setText(Alarm_History_Text);
-    Alarm_History_MessageBox.exec();
+    Alarm_Report->setAlarmText(Alarm_History_Text);
+    Alarm_Report->setVisible(true);
+    repaint();
+
+//    QMessageBox Alarm_History_MessageBox;
+//    Alarm_History_MessageBox.setFixedWidth(800);
+//    Alarm_History_MessageBox.setText(Alarm_History_Text);
+//    Alarm_History_MessageBox.exec();
+}
+
+void
+CW_Remote_Screen::alarm_report_acknowledged ( ) {
+    alarms_acknowledged = true;
+    repaint();
+}
+
+void
+CW_Remote_Screen::alarm_report_dismissed ( ) {
+    alarms_acknowledged = false;
+    repaint();
 }
 
 void
@@ -910,8 +943,8 @@ CW_Remote_Screen::duplex_metrics (  ) {
 }
 
 void
-CW_Remote_Screen::simplex_metrics (  ) {
-    if (Visible_Graph_Count == 2) {
+CW_Remote_Screen::simplex_metrics ( bool Force_Simplex ) {
+    if ((Visible_Graph_Count == 2) or Force_Simplex) {
         int descriptor_list_length = Graph_Metric_Descriptor_List.count();
         // upper_chartview_height = Upper_Chartview->height();
         // lower_chartview_height = Lower_Chartview->height();
