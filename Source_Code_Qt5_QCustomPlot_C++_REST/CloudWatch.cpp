@@ -394,6 +394,11 @@ AWS_CloudWatch::AWS_CloudWatch_GetGraphMetricStatistics ( QJsonArray Graph_Metri
         }
     }
 
+    for (int idx = 0; idx < reply_list.size(); idx++) {
+        QNetworkReply *reply = reply_list[idx];
+        reply->deleteLater();
+    }
+    
     getmetricstatistics_reply_data.clear();
 
     if (graph_success) return graph_metrics_statistics_list;
@@ -490,6 +495,11 @@ AWS_CloudWatch::AWS_CloudWatch_GetPageMetricStatistics ( QJsonArray Graph_Metric
         // if (not future.result()) page_success = false;
     }
 
+    for (int idx = 0; idx < reply_list.size(); idx++) {
+        QNetworkReply *reply = reply_list[idx];
+        reply->deleteLater();
+    }
+    
     getmetricstatistics_reply_data.clear();
 
     if (not page_success) return QVector<QVector<Metric_Statistics_Descriptor>>(0);
@@ -708,6 +718,11 @@ AWS_CloudWatch::AWS_CloudWatch_AlarmHistory ( QJsonArray Alarm_Name_List,
         }
     }
 
+    for (int idx = 0; idx < reply_list.size(); idx++) {
+        QNetworkReply *reply = reply_list[idx];
+        reply->deleteLater();
+    }
+    
     describealarmhistory_reply_data.clear();
 
     if (not alarm_success) alarm_history_results.clear();

@@ -108,6 +108,7 @@
 
 
 #include "CW_Remote.h"
+// #include "CW_Remote_Ini_Do_Not_Publish.h"
 
 static
 int Initial_Refresh_Interval_Seconds = 60;
@@ -153,19 +154,20 @@ int main ( int argc, char* argv[] ) {
     QString cw_remote_ini_json;
     // QFile cw_remote_ini_file;
     // cw_remote_ini_file.setFileName("~/Documents/CW_Remote/CW_Remote.ini");
-    QString cw_remote__ini_filename = QCoreApplication::applicationDirPath();
-    cw_remote__ini_filename.truncate(cw_remote__ini_filename.indexOf("CW_Remote.app"));
-    cw_remote__ini_filename += "CW_Remote.ini";
+    QString cw_remote_ini_filename = QCoreApplication::applicationDirPath();
+    cw_remote_ini_filename.truncate(cw_remote_ini_filename.indexOf("CW_Remote.app"));
+    cw_remote_ini_filename += "CW_Remote.ini";
     // qDebug() << cw_remote__ini_filename;
-    if (not QFileInfo(cw_remote__ini_filename).exists()) {
-        cw_remote__ini_filename = QDir::homePath() + "/Documents/CW_Remote/CW_Remote.ini";
-        if (not QFileInfo(cw_remote__ini_filename).exists()) return 255;
+    if (not QFileInfo(cw_remote_ini_filename).exists()) {
+        cw_remote_ini_filename = QDir::homePath() + "/Documents/CW_Remote/CW_Remote.ini";
+        if (not QFileInfo(cw_remote_ini_filename).exists()) return 255;
     }
-    QFile cw_remote_ini_file(cw_remote__ini_filename);
+    QFile cw_remote_ini_file(cw_remote_ini_filename);
     cw_remote_ini_file.open(QIODevice::ReadOnly | QIODevice::Text);
     cw_remote_ini_json = cw_remote_ini_file.readAll();
     cw_remote_ini_file.close();
 
+    // QString cw_remote_ini_json = CW_Remote_Ini_Json;
     CW_Remote_ini = QJsonDocument::fromJson(cw_remote_ini_json.toUtf8()).object();
 
     QString aws_access_id = get_json_string_value(CW_Remote_ini, "aws_access_id", "");
@@ -220,8 +222,9 @@ CW_Remote::~CW_Remote ( ) {
 }
 
 void
-CW_Remote::showEvent ( QShowEvent* /* event */ ) {
-    repaint();
+CW_Remote::closeEvent ( QCloseEvent* /*event*/ ) {
+    qApp->closeAllWindows();
+    qApp->exit();
 }
 
 
@@ -244,7 +247,7 @@ CW_Remote_Screen::CW_Remote_Screen ( QWidget *parent ) : QWidget ( parent ) {
                                  Visible_Graph_Count,
                                  this);
     connect(Control_Bar, SIGNAL(alarmsUpdate()), this, SLOT(update_alarms()));
-    connect(Control_Bar, SIGNAL(metricsUpdate()), this, SLOT(update_page_metrics()));
+    connect(Control_Bar, SIGNAL(metricsUpdate()), this, SLOT(refresh_button_update_page_metrics()));
     connect(Control_Bar, SIGNAL(metricsPrevious()), this, SLOT(previous_page_metrics()));
     connect(Control_Bar, SIGNAL(metricsNext()), this, SLOT(next_page_metrics()));
     connect(Control_Bar, SIGNAL(metricsDuplex()), this, SLOT(duplex_metrics()));
@@ -318,8 +321,18 @@ CW_Remote_Screen::~CW_Remote_Screen ( ) {
 }
 
 void
-CW_Remote_Screen::showEvent ( QShowEvent* /* event */ ) {
+CW_Remote_Screen::showEvent ( QShowEvent* event ) {
+    QWidget::showEvent(event);
+    timer_update_page_metrics();
+    timer->start(Initial_Refresh_Interval_Seconds * 1000);
     repaint();
+}
+
+void
+CW_Remote_Screen::hideEvent ( QHideEvent* event ) {
+    QWidget::hideEvent( event );
+    // The timer will otherwise waste power and carry out useless calculations
+    timer->stop();
 }
 
 void
@@ -432,6 +445,13 @@ CW_Remote_Screen::timer_update_page_metrics (  ) {
         ((Visible_Graph_Count == 1) and (Lower_CustomPlot->zoom_level == 0))) update_page_metrics();
 
     if (Automatic_Alarm_History) update_alarm_history(false);
+}
+
+void
+CW_Remote_Screen::refresh_button_update_page_metrics (  ) {
+    update_page_metrics();
+    // Make certain the timer is running, even if it causes a restart
+    timer->start(Initial_Refresh_Interval_Seconds * 1000);
 }
 
 void

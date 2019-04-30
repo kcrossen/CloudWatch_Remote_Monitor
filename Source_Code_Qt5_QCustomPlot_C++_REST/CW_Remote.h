@@ -27,9 +27,6 @@
 #include "AlarmReport.h"
 #include "CloudWatch.h"
 
-#include "AWS_Metrics.h"
-#include "json_helpers.h"
-
 struct Metric_Statistics_Datapoint_Compare {
     bool operator()(const Metric_Statistics_Datapoint& first_datapoint,
                     const Metric_Statistics_Datapoint& second_datapoint) const {
@@ -72,11 +69,17 @@ private:
 
 protected:
     void
-    showEvent ( QShowEvent* /* event */ );
+    showEvent ( QShowEvent*  event );
+
+    void
+    hideEvent ( QHideEvent*  event );
 
 public slots:
     void
     timer_update_page_metrics (  );
+
+    void
+    refresh_button_update_page_metrics (  );
 
     void
     update_alarms (  );
@@ -125,11 +128,11 @@ public:
 private:
 
 protected:
-//    void
-//    closeEvent ( QCloseEvent* event );
-
     void
-    showEvent ( QShowEvent* /* event */ );
+    closeEvent ( QCloseEvent* /*event*/ );
+
+    // void
+    // showEvent ( QShowEvent* /* event */ );
 
 public slots:
 
